@@ -17,7 +17,7 @@ export default function Topo() {
     <header className="topo">
       <Link href="/painel" className="logo">FichaPronta</Link>
       <nav className="nav" aria-label="Principal">
-        <Link href="/painel" className={path.startsWith("/painel") ? "ativo" : ""}>Fichas</Link>
+        <Link href="/painel" className={path.startsWith("/painel") ? "ativo" : ""}>Adicionar novo paciente</Link>
         <Link href="/pacientes" className={path.startsWith("/pacientes") ? "ativo" : ""}>Pacientes</Link>
         <Link href="/configurar" className={path.startsWith("/configurar") ? "ativo" : ""}>Minha ficha</Link>
         <Link href="/cadastro" className={path.startsWith("/cadastro") ? "ativo" : ""}>Perfil</Link>
