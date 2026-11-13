@@ -28,7 +28,7 @@ export default function Login() {
     setCarregando(true);
     const { error } = await supabase.auth.signInWithOtp({
       email: email.trim(),
-      options: { shouldCreateUser: true },
+      options: { shouldCreateUser: true, emailRedirectTo: `${window.location.origin}/auth/callback` },
     });
     setCarregando(false);
     if (error) return setErro("Não foi possível enviar o código. Confira o e-mail e tente de novo.");
