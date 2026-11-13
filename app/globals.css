@@ -88,3 +88,10 @@ input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-
 .cabeca-paciente h1 { margin: 6px 0; font-size: 26px; }
 .cabeca-paciente p { margin: 0; color: #e6f6f5; font-size: 14px; }
 .ficha-corpo { max-width: 640px; margin: 0 auto; padding: 18px 16px 48px; }
+
+@media print {
+  .nao-imprimir, .topo { display: none !important; }
+  body { background: #fff; }
+  .cartao { border: 0; padding: 0 0 12px; }
+  .grade { display: block; }
+}

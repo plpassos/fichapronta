@@ -39,6 +39,6 @@ export async function middleware(request) {
 }
 
 export const config = {
-  // O link do paciente (/f/...) não passa pelo login
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|f/).*)"],
+  // Os links do paciente (/f/... e /e/...) não passam pelo login
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|f/|e/).*)"],
 };

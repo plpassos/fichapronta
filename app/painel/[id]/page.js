@@ -33,6 +33,7 @@ export default function DetalheFicha({ params }) {
         <Topo />
         <main className="conteudo pilha">
           <h1 style={{ margin: 0, fontSize: 22 }}>{f.paciente_nome}</h1>
+          <a href={`/painel/${f.id}/evolucao`} className="botao" style={{ alignSelf: "flex-start" }}>Evolução</a>
           <div className="cartao">O paciente ainda não respondeu. Link: <span style={{ wordBreak: "break-all" }}>{typeof window !== "undefined" ? `${window.location.origin}/f/${f.token}` : ""}</span></div>
         </main>
       </>
@@ -54,7 +55,10 @@ export default function DetalheFicha({ params }) {
             <h1 style={{ margin: 0, fontSize: 22 }}>{r.nome || f.paciente_nome}{anos !== null ? `, ${anos} anos` : ""}</h1>
             <div className="suave">{[r.profissao, r.endereco, r.tel].filter(Boolean).join(" · ")}</div>
           </div>
-          <button type="button" className="botao sec" onClick={() => window.print()}>Imprimir / salvar PDF</button>
+          <div className="linha nao-imprimir">
+            <button type="button" className="botao sec" onClick={() => window.print()}>Imprimir / salvar PDF</button>
+            <a href={`/painel/${f.id}/evolucao`} className="botao">Evolução</a>
+          </div>
         </div>
 
         <div className="grade">
