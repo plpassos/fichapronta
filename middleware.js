@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
-const AREAS_PROTEGIDAS = ["/painel", "/configurar", "/cadastro"];
+const AREAS_PROTEGIDAS = ["/painel", "/pacientes", "/configurar", "/cadastro"];
 
 export async function middleware(request) {
   let response = NextResponse.next({ request });

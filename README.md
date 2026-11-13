@@ -11,6 +11,7 @@ Ficha de anamnese online para fisioterapeutas e massoterapeutas.
 - Painel com a lista de fichas, alertas e cuidados destacados, e a ficha completa (com impressão em PDF pelo navegador)
 
 - Evolução diária: dor antes/depois, sinais vitais, técnicas, regiões, anotações, orientações para casa e fotos
+- Aba Pacientes: pesquisa por nome, telefone, queixa ou região, e opção de inativar/reativar paciente
 - Exportar todas as evoluções em PDF e link privado para o paciente acompanhar a própria evolução
 
 **Próxima etapa (ainda não está no código)**: conversa com a assistente de IA.
@@ -23,7 +24,7 @@ Ficha de anamnese online para fisioterapeutas e massoterapeutas.
 
 ### 1. Supabase (banco de dados e login)
 1. Crie uma conta em supabase.com → **New project** → região **South America (São Paulo)**.
-2. Abra **SQL Editor → New query**, cole todo o conteúdo de `supabase/schema.sql` e clique em **Run**. Depois faça o mesmo com `supabase/evolucao.sql` (cria a evolução e a pasta das fotos).
+2. Abra **SQL Editor → New query**, cole todo o conteúdo de `supabase/schema.sql` e clique em **Run**. Depois faça o mesmo com `supabase/evolucao.sql` (cria a evolução e a pasta das fotos) e com `supabase/pacientes.sql` (cria a opção de paciente ativo/inativo).
 3. Em **Authentication → Email Templates → Magic Link**, troque o texto para mostrar o código, por exemplo:
    `Seu código para entrar no FichaPronta: {{ .Token }}`
    (sem isso, o e-mail chega com um link em vez do código de 6 dígitos).
