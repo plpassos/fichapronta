@@ -17,6 +17,21 @@ export default function DetalheFicha({ params }) {
   const supabase = createClient();
   const [f, setF] = useState(undefined);
 
+  async function alternarAtivo() {
+    const ativo = f.ativo === false;
+    if (!ativo && !window.confirm("Inativar este paciente? A ficha e as evoluções continuam salvas e você pode reativar quando quiser.")) return;
+    const inativado_em = ativo ? null : new Date().toISOString();
+    const { error } = await supabase.from("fichas").update({ ativo, inativado_em }).eq("id", f.id);
+    if (!error) setF({ ...f, ativo, inativado_em });
+  }
+
+  const botaoAtivo = (x) => (
+    <button type="button" className="botao sec nao-imprimir" onClick={alternarAtivo}>{x.ativo === false ? "Reativar paciente" : "Inativar paciente"}</button>
+  );
+  const avisoInativo = (x) => x.ativo === false ? (
+    <div className="cartao nao-imprimir" style={{ background: "#eceff0" }}>Paciente inativo desde {new Date(x.inativado_em || Date.now()).toLocaleDateString("pt-BR")}. Ele não aparece na lista principal, mas os dados continuam salvos.</div>
+  ) : null;
+
   useEffect(() => {
     (async () => {
       const { data } = await supabase.from("fichas").select("*").eq("id", params.id).maybeSingle();
@@ -33,7 +48,8 @@ export default function DetalheFicha({ params }) {
         <Topo />
         <main className="conteudo pilha">
           <h1 style={{ margin: 0, fontSize: 22 }}>{f.paciente_nome}</h1>
-          <a href={`/painel/${f.id}/evolucao`} className="botao" style={{ alignSelf: "flex-start" }}>Evolução</a>
+          {avisoInativo(f)}
+          <div className="linha"><a href={`/painel/${f.id}/evolucao`} className="botao">Evolução</a>{botaoAtivo(f)}</div>
           <div className="cartao">O paciente ainda não respondeu. Link: <span style={{ wordBreak: "break-all" }}>{typeof window !== "undefined" ? `${window.location.origin}/f/${f.token}` : ""}</span></div>
         </main>
       </>
@@ -50,6 +66,7 @@ export default function DetalheFicha({ params }) {
     <>
       <Topo />
       <main className="conteudo pilha">
+        {avisoInativo(f)}
         <div className="linha" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
           <div>
             <h1 style={{ margin: 0, fontSize: 22 }}>{r.nome || f.paciente_nome}{anos !== null ? `, ${anos} anos` : ""}</h1>
@@ -58,6 +75,7 @@ export default function DetalheFicha({ params }) {
           <div className="linha nao-imprimir">
             <button type="button" className="botao sec" onClick={() => window.print()}>Imprimir / salvar PDF</button>
             <a href={`/painel/${f.id}/evolucao`} className="botao">Evolução</a>
+            {botaoAtivo(f)}
           </div>
         </div>
 
