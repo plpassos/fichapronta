@@ -35,8 +35,8 @@ export default function Painel() {
     const { data: p } = await supabase.from("profiles").select("*").eq("id", user.id).maybeSingle();
     if (!p) return (window.location.href = "/cadastro");
     setPerfil(p);
-    const { data } = await supabase.from("fichas").select("id, paciente_nome, status, respostas, tecnicas, created_at, respondida_em").order("created_at", { ascending: false }).limit(100);
-    setFichas(data || []);
+    const { data } = await supabase.from("fichas").select("*").order("created_at", { ascending: false }).limit(100);
+    setFichas((data || []).filter((f) => f.ativo !== false));
   }
 
   useEffect(() => { carregar(); }, []);
@@ -88,7 +88,7 @@ export default function Painel() {
         </section>
 
         <section className="cartao" style={{ gridColumn: "span 2", minWidth: 0 }}>
-          <h2>Fichas</h2>
+          <div className="linha" style={{ justifyContent: "space-between" }}><h2 style={{ margin: 0 }}>Fichas de pacientes ativos</h2><Link href="/pacientes">Pesquisar e ver inativos</Link></div>
           {!fichas.length && <p className="suave">Nenhuma ficha ainda. Gere o primeiro link ao lado.</p>}
           {fichas.map((f) => {
             const { alertas, cuidados } = f.respostas ? calcularAlertas(f.respostas, f.tecnicas || []) : { alertas: [], cuidados: [] };
