@@ -132,6 +132,7 @@ export default function Evolucao({ params }) {
     <>
       <div className="nao-imprimir"><Topo /></div>
       <main className="conteudo pilha">
+        {ficha.ativo === false && <div className="cartao nao-imprimir" style={{ background: "#eceff0" }}>Paciente inativo. Você ainda pode consultar e registrar evoluções; para reativar, use a ficha ou a aba Pacientes.</div>}
         <div className="linha" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
           <div>
             <h1 style={{ margin: 0, fontSize: 22 }}>{r.nome || ficha.paciente_nome}</h1>
