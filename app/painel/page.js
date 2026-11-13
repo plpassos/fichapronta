@@ -36,7 +36,7 @@ export default function Painel() {
     if (!p) return (window.location.href = "/cadastro");
     setPerfil(p);
     const { data } = await supabase.from("fichas").select("*").order("created_at", { ascending: false }).limit(100);
-    setFichas((data || []).filter((f) => f.ativo !== false));
+    setFichas((data || []).filter((f) => f.ativo !== false && f.status !== "respondida"));
   }
 
   useEffect(() => { carregar(); }, []);
@@ -88,8 +88,8 @@ export default function Painel() {
         </section>
 
         <section className="cartao" style={{ gridColumn: "span 2", minWidth: 0 }}>
-          <h2>Fichas de pacientes ativos</h2>
-          {!fichas.length && <p className="suave">Nenhuma ficha ainda. Gere o primeiro link ao lado.</p>}
+          <h2>Aguardando resposta do formulário</h2>
+          {!fichas.length && <p className="suave">Nenhum paciente aguardando resposta. Os pacientes que já responderam ficam na aba Pacientes.</p>}
           {fichas.map((f) => {
             const { alertas, cuidados } = f.respostas ? calcularAlertas(f.respostas, f.tecnicas || []) : { alertas: [], cuidados: [] };
             return (
