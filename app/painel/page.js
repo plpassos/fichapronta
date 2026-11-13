@@ -88,7 +88,7 @@ export default function Painel() {
         </section>
 
         <section className="cartao" style={{ gridColumn: "span 2", minWidth: 0 }}>
-          <div className="linha" style={{ justifyContent: "space-between" }}><h2 style={{ margin: 0 }}>Fichas de pacientes ativos</h2><Link href="/pacientes">Pesquisar e ver inativos</Link></div>
+          <h2>Fichas de pacientes ativos</h2>
           {!fichas.length && <p className="suave">Nenhuma ficha ainda. Gere o primeiro link ao lado.</p>}
           {fichas.map((f) => {
             const { alertas, cuidados } = f.respostas ? calcularAlertas(f.respostas, f.tecnicas || []) : { alertas: [], cuidados: [] };
