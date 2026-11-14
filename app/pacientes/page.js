@@ -120,6 +120,7 @@ export default function Pacientes() {
                   <div className="suave">{[r.queixa && String(r.queixa).slice(0, 70), p.paciente_whatsapp || r.tel, `desde ${dataBR(p.created_at)}`].filter(Boolean).join(" · ")}</div>
                 </div>
                 <div className="linha">
+                  <Link href={`/painel/${p.id}/avaliacao`} className="botao sec">Avaliação</Link>
                   <Link href={`/painel/${p.id}/evolucao`} className="botao sec">Evolução</Link>
                   <button type="button" className="botao sec" onClick={() => alternarAtivo(p)}>{p.ativo === false ? "Reativar" : "Inativar"}</button>
                 </div>
