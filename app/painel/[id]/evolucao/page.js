@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import Topo from "@/components/Topo";
+import { BotaoMicrofone } from "@/components/Voz";
 import { TECNICAS, calcularAlertas } from "@/lib/ficha";
 
 const SINAIS = [
@@ -14,6 +15,11 @@ const SINAIS = [
   { id: "temp", nome: "Temperatura (°C)", ph: "36,5" },
   { id: "gli", nome: "Glicemia (mg/dL)", ph: "" },
 ];
+
+const FRASES_PADRAO = {
+  notas: ["Paciente relata melhora desde a última sessão.", "Sem intercorrências durante a sessão.", "Boa tolerância às técnicas aplicadas."],
+  orientacoes: ["Manter as orientações da sessão anterior.", "Evitar esforço intenso nas próximas 24 horas."],
+};
 
 const VAZIO = { dor_antes: "", dor_depois: "", sinais: {}, tecnicas: [], regioes: "", notas: "", orientacoes: "" };
 
@@ -41,10 +47,22 @@ export default function Evolucao({ params }) {
   const [salvando, setSalvando] = useState(false);
   const [msg, setMsg] = useState("");
   const [userId, setUserId] = useState(null);
+  const [frases, setFrases] = useState(FRASES_PADRAO);
+  const [podeSalvarFrases, setPodeSalvarFrases] = useState(false);
+  const [aviso, setAviso] = useState("");
 
   async function carregar() {
     const { data: { user } } = await supabase.auth.getUser();
     setUserId(user.id);
+    const { data: perfil, error: erroPerfil } = await supabase.from("profiles").select("frases").eq("id", user.id).maybeSingle();
+    if (!erroPerfil) {
+      setPodeSalvarFrases(true);
+      const fr = perfil?.frases || {};
+      setFrases({
+        notas: Array.isArray(fr.notas) ? fr.notas : FRASES_PADRAO.notas,
+        orientacoes: Array.isArray(fr.orientacoes) ? fr.orientacoes : FRASES_PADRAO.orientacoes,
+      });
+    }
     const { data: f } = await supabase.from("fichas").select("*").eq("id", params.id).maybeSingle();
     setFicha(f || null);
     if (!f) return;
@@ -60,6 +78,52 @@ export default function Evolucao({ params }) {
   }
 
   useEffect(() => { carregar(); }, [params.id]);
+
+  function anexar(k, texto) {
+    setForm((f) => {
+      const atual = (f[k] || "").trim();
+      const sep = k === "regioes" ? ", " : k === "orientacoes" ? "\n" : " ";
+      return { ...f, [k]: atual ? atual + sep + texto : texto };
+    });
+  }
+
+  function repetirUltima() {
+    const u = evolucoes[0];
+    if (!u) return;
+    setForm((f) => ({ ...f, tecnicas: u.tecnicas || [], regioes: u.regioes || "", orientacoes: u.orientacoes || "" }));
+    setAviso("Dados da última sessão copiados. Ajuste o que mudou.");
+  }
+
+  async function gravarFrases(novas) {
+    setFrases(novas);
+    if (!podeSalvarFrases) return;
+    const { error } = await supabase.from("profiles").update({ frases: novas }).eq("id", userId);
+    if (error) setAviso("Não foi possível salvar as frases.");
+  }
+  function salvarFrase(k) {
+    const t = (form[k] || "").trim();
+    if (!t || frases[k].includes(t)) return;
+    gravarFrases({ ...frases, [k]: [...frases[k], t] });
+  }
+  function removerFrase(k, i) {
+    gravarFrases({ ...frases, [k]: frases[k].filter((_, j) => j !== i) });
+  }
+
+  function Frases({ k }) {
+    return (
+      <div className="pilha" style={{ gap: 6, marginTop: 6 }}>
+        <div className="chips">
+          {frases[k].map((fr, i) => (
+            <span key={i} style={{ display: "inline-flex", alignItems: "center", border: "1px solid var(--borda)", borderRadius: 99, background: "var(--fundo)" }}>
+              <button type="button" onClick={() => anexar(k, fr)} style={{ minHeight: 40, padding: "0 6px 0 12px", border: 0, background: "none", font: "inherit", fontSize: 14, cursor: "pointer", textAlign: "left" }}>{fr}</button>
+              {podeSalvarFrases && <button type="button" aria-label={`Remover frase ${fr}`} onClick={() => removerFrase(k, i)} style={{ minWidth: 36, minHeight: 40, border: 0, background: "none", fontSize: 18, color: "var(--suave)", cursor: "pointer" }}>×</button>}
+            </span>
+          ))}
+        </div>
+        {podeSalvarFrases && <button type="button" onClick={() => salvarFrase(k)} disabled={!(form[k] || "").trim()} style={{ alignSelf: "flex-start", minHeight: 36, padding: "0 10px", border: 0, background: "none", color: "var(--marca)", font: "inherit", fontSize: 13, cursor: "pointer" }}>+ Salvar texto atual como frase</button>}
+      </div>
+    );
+  }
 
   function campo(k) {
     return { value: form[k], onChange: (e) => setForm({ ...form, [k]: e.target.value }) };
@@ -144,6 +208,7 @@ export default function Evolucao({ params }) {
           </div>
           <div className="linha nao-imprimir">
             <Link href={`/painel/${ficha.id}`} className="botao sec">Ver anamnese</Link>
+            <Link href={`/painel/${ficha.id}/avaliacao`} className="botao sec">Avaliação física</Link>
             <button type="button" className="botao sec" onClick={() => window.print()} disabled={!evolucoes.length}>Exportar todas em PDF</button>
           </div>
         </div>
@@ -180,7 +245,11 @@ export default function Evolucao({ params }) {
 
         <div className="grade">
           <form onSubmit={salvar} className="cartao pilha nao-imprimir">
-            <h2 style={{ margin: 0 }}>Nova evolução · {dataBR(new Date())}</h2>
+            <div className="linha" style={{ justifyContent: "space-between" }}>
+              <h2 style={{ margin: 0 }}>Nova evolução · {dataBR(new Date())}</h2>
+              {evolucoes.length > 0 && <button type="button" className="botao sec" onClick={repetirUltima}>Repetir última evolução</button>}
+            </div>
+            {aviso && <p role="status" className="suave" style={{ margin: 0 }}>{aviso}</p>}
             <div className="linha" style={{ flexWrap: "nowrap" }}>
               <div style={{ flex: 1 }}><label className="rotulo" htmlFor="da">Dor antes (0–10)</label><input id="da" type="text" inputMode="numeric" {...campo("dor_antes")} /></div>
               <div style={{ flex: 1 }}><label className="rotulo" htmlFor="dd">Dor depois (0–10)</label><input id="dd" type="text" inputMode="numeric" {...campo("dor_depois")} /></div>
@@ -211,9 +280,9 @@ export default function Evolucao({ params }) {
               {cuidados.length > 0 && <div className="nota" style={{ marginTop: 8 }}>Lembrete da ficha: {cuidados.map((c) => `${c.resumo} → adaptar ${c.adapta}`).join("; ")}.</div>}
             </div>
 
-            <div><label className="rotulo" htmlFor="reg">Regiões tratadas</label><input id="reg" type="text" {...campo("regioes")} /></div>
-            <div><label className="rotulo" htmlFor="notas">Como foi a sessão</label><textarea id="notas" {...campo("notas")} /></div>
-            <div><label className="rotulo" htmlFor="ori">Orientações para casa</label><textarea id="ori" {...campo("orientacoes")} /></div>
+            <div><div className="linha" style={{ justifyContent: "space-between", marginBottom: 6 }}><label className="rotulo" htmlFor="reg" style={{ margin: 0 }}>Regiões tratadas</label><BotaoMicrofone onTexto={(t) => anexar("regioes", t)} /></div><input id="reg" type="text" {...campo("regioes")} /></div>
+            <div><div className="linha" style={{ justifyContent: "space-between", marginBottom: 6 }}><label className="rotulo" htmlFor="notas" style={{ margin: 0 }}>Como foi a sessão</label><BotaoMicrofone onTexto={(t) => anexar("notas", t)} /></div><textarea id="notas" {...campo("notas")} /><Frases k="notas" /></div>
+            <div><div className="linha" style={{ justifyContent: "space-between", marginBottom: 6 }}><label className="rotulo" htmlFor="ori" style={{ margin: 0 }}>Orientações para casa</label><BotaoMicrofone onTexto={(t) => anexar("orientacoes", t)} /></div><textarea id="ori" {...campo("orientacoes")} /><Frases k="orientacoes" /></div>
 
             <div>
               <label className="rotulo" htmlFor="fotos">Fotos da sessão</label>
