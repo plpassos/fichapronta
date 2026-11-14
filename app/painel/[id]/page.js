@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import Topo from "@/components/Topo";
-import { calcularAlertas, montarEtapas, formatarResposta } from "@/lib/ficha";
+import { calcularAlertas, montarEtapas, formatarResposta, ROTULOS_ANTIGOS } from "@/lib/ficha";
 
 function idade(nasc) {
   if (!nasc) return null;
@@ -49,7 +49,7 @@ export default function DetalheFicha({ params }) {
         <main className="conteudo pilha">
           <h1 style={{ margin: 0, fontSize: 22 }}>{f.paciente_nome}</h1>
           {avisoInativo(f)}
-          <div className="linha"><a href={`/painel/${f.id}/evolucao`} className="botao">Evolução</a>{botaoAtivo(f)}</div>
+          <div className="linha"><a href={`/painel/${f.id}/avaliacao`} className="botao sec">Avaliação física</a><a href={`/painel/${f.id}/evolucao`} className="botao">Evolução</a>{botaoAtivo(f)}</div>
           <div className="cartao">O paciente ainda não respondeu. Link: <span style={{ wordBreak: "break-all" }}>{typeof window !== "undefined" ? `${window.location.origin}/f/${f.token}` : ""}</span></div>
         </main>
       </>
@@ -58,7 +58,7 @@ export default function DetalheFicha({ params }) {
 
   const r = f.respostas || {};
   const tecnicas = f.tecnicas || [];
-  const { alertas, cuidados } = calcularAlertas(r, tecnicas);
+  const { alertas, cuidados, duvidas } = calcularAlertas(r, tecnicas);
   const etapas = montarEtapas(tecnicas, f.opcionais || {});
   const anos = idade(r.nasc);
 
@@ -74,6 +74,7 @@ export default function DetalheFicha({ params }) {
           </div>
           <div className="linha nao-imprimir">
             <button type="button" className="botao sec" onClick={() => window.print()}>Imprimir / salvar PDF</button>
+            <a href={`/painel/${f.id}/avaliacao`} className="botao sec">Avaliação física</a>
             <a href={`/painel/${f.id}/evolucao`} className="botao">Evolução</a>
             {botaoAtivo(f)}
           </div>
@@ -89,6 +90,12 @@ export default function DetalheFicha({ params }) {
             <div style={{ fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em" }}><b>Cuidados com técnicas</b></div>
             {cuidados.length ? cuidados.map((c) => <div key={c.id} style={{ marginTop: 6 }}>{c.resumo} → adaptar {c.adapta}</div>) : <div style={{ marginTop: 6 }}>Nenhum marcado.</div>}
           </div>
+          {duvidas.length > 0 && (
+            <div className="cartao" style={{ background: "#eef3fb", borderColor: "#c7d6ee" }}>
+              <div style={{ fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", color: "#1f4e8c" }}>Confirmar na consulta ("Não sei")</div>
+              {duvidas.map((d) => <div key={d.id} style={{ marginTop: 6 }}>{d.resumo}</div>)}
+            </div>
+          )}
         </div>
 
         <div className="grade">
@@ -109,6 +116,19 @@ export default function DetalheFicha({ params }) {
             </dl>
           </section>
         ))}
+        {(() => {
+          const usados = new Set(etapas.flatMap((et) => et.fields.flatMap((fd) => fd.type === "yn" ? fd.items.map((it) => it.id) : [fd.id, fd.id + "_outro"])));
+          const extras = Object.keys(r).filter((k) => !usados.has(k) && r[k] !== "" && r[k] !== null && !/_outro$/.test(k));
+          if (!extras.length) return null;
+          return (
+            <section className="cartao">
+              <h2>Outras respostas</h2>
+              <dl className="respostas" style={{ margin: 0 }}>
+                {extras.flatMap((k) => [<dt key={k + "t"}>{ROTULOS_ANTIGOS[k] || k}</dt>, <dd key={k + "d"}>{Array.isArray(r[k]) ? r[k].join(", ") : String(r[k])}{r[k + "_outro"] ? ` — ${r[k + "_outro"]}` : ""}</dd>])}
+              </dl>
+            </section>
+          );
+        })()}
         <p className="suave">Respondida em {new Date(f.respondida_em).toLocaleString("pt-BR")}.</p>
       </main>
     </>
