@@ -1,0 +1,455 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { createClient } from "@/lib/supabase/client";
+import Topo from "@/components/Topo";
+import { BotaoMicrofone } from "@/components/Voz";
+import { ADM, FORCA, FUNCIONAIS, REGIOES_CORPO, sugerirRegioes, nomeTeste } from "@/lib/testes";
+
+const VAZIO = { testes: {}, adm: {}, forca: {}, func: {}, pg: [], pgObs: "", postura: "", obs: "" };
+
+function dataBR(d) {
+  return new Date(d).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+function dataCurta(d) {
+  return new Date(d).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+}
+function vazio(v) {
+  return v === undefined || v === null || v === "";
+}
+function sinal(v) {
+  return v === "+" ? "+" : v === "-" ? "−" : "";
+}
+function palavra(v) {
+  return v === "+" ? "positivo" : v === "-" ? "negativo" : "—";
+}
+
+// Remove campos vazios antes de salvar
+function limpar(form) {
+  const dados = {};
+  const lados = (obj, num) => {
+    const out = {};
+    for (const [k, v] of Object.entries(obj || {})) {
+      const l = {};
+      for (const lado of ["D", "E"]) {
+        if (!vazio(v?.[lado])) l[lado] = num ? Number(String(v[lado]).replace(",", ".")) : v[lado];
+      }
+      if (Object.keys(l).length && Object.values(l).every((x) => !num || Number.isFinite(x))) out[k] = l;
+    }
+    return out;
+  };
+  const testes = lados(form.testes, false);
+  const adm = lados(form.adm, true);
+  const forca = lados(form.forca, true);
+  const func = lados(form.func, true);
+  if (Object.keys(testes).length) dados.testes = testes;
+  if (Object.keys(adm).length) dados.adm = adm;
+  if (Object.keys(forca).length) dados.forca = forca;
+  if (Object.keys(func).length) dados.func = func;
+  if (form.pg.length) dados.pg = form.pg;
+  if (form.pgObs.trim()) dados.pgObs = form.pgObs.trim();
+  if (form.postura.trim()) dados.postura = form.postura.trim();
+  if (form.obs.trim()) dados.obs = form.obs.trim();
+  return dados;
+}
+
+function contarMedidas(d = {}) {
+  let n = 0;
+  for (const k of ["adm", "forca", "func"]) for (const v of Object.values(d[k] || {})) n += Object.keys(v || {}).length;
+  return n;
+}
+
+function positivos(d = {}) {
+  const out = [];
+  for (const [id, v] of Object.entries(d.testes || {})) {
+    const lados = ["D", "E"].filter((l) => v?.[l] === "+");
+    if (lados.length) out.push(`${nomeTeste(id)} (${lados.join("/")})`);
+  }
+  return out;
+}
+
+function comparar(a = {}, b = {}) {
+  const linhas = [];
+  const rotLado = (unico, lado) => (unico ? "" : ` ${lado}`);
+  for (const [id, va] of Object.entries(a.testes || {})) {
+    const vb = b.testes?.[id];
+    if (!vb) continue;
+    for (const l of ["D", "E"]) {
+      if (va[l] && vb[l] && va[l] !== vb[l]) linhas.push(`${nomeTeste(id)} ${l}: ${palavra(va[l])} → ${palavra(vb[l])}`);
+    }
+  }
+  for (const item of ADM) {
+    const va = a.adm?.[item.id], vb = b.adm?.[item.id];
+    if (!va || !vb) continue;
+    for (const l of item.unico ? ["D"] : ["D", "E"]) {
+      if (!vazio(va[l]) && !vazio(vb[l]) && va[l] !== vb[l]) linhas.push(`${item.articulacao} ${item.movimento.toLowerCase()}${rotLado(item.unico, l)}: ${va[l]}° → ${vb[l]}°`);
+    }
+  }
+  for (const item of FORCA) {
+    const va = a.forca?.[item.id], vb = b.forca?.[item.id];
+    if (!va || !vb) continue;
+    for (const l of ["D", "E"]) {
+      if (!vazio(va[l]) && !vazio(vb[l]) && va[l] !== vb[l]) linhas.push(`${item.nome} ${l}: ${va[l]} → ${vb[l]}`);
+    }
+  }
+  for (const item of FUNCIONAIS) {
+    const va = a.func?.[item.id], vb = b.func?.[item.id];
+    if (!va || !vb) continue;
+    for (const l of item.lado ? ["D", "E"] : ["D"]) {
+      if (!vazio(va[l]) && !vazio(vb[l]) && va[l] !== vb[l]) linhas.push(`${item.nome}${item.lado ? " " + l : ""}: ${va[l]} ${item.unidade} → ${vb[l]} ${item.unidade}`);
+    }
+  }
+  return linhas;
+}
+
+const estiloNum = { width: 84, minHeight: 44, padding: "8px 10px", borderRadius: 10, border: "1px solid var(--borda)", background: "var(--fundo)", font: "inherit", fontSize: 16, color: "var(--texto)" };
+const estiloSelect = { ...estiloNum, width: 84 };
+
+function Secao({ titulo, aberta, children }) {
+  return (
+    <details open={aberta} className="cartao" style={{ padding: 0 }}>
+      <summary style={{ cursor: "pointer", padding: "16px 20px", fontSize: 17, fontWeight: 600, minHeight: 44 }}>{titulo}</summary>
+      <div className="pilha" style={{ padding: "0 20px 20px" }}>{children}</div>
+    </details>
+  );
+}
+
+function ChipSinal({ ativo, onClick, children, rotulo }) {
+  return (
+    <button type="button" onClick={onClick} aria-pressed={ativo} aria-label={rotulo}
+      style={{ minWidth: 44, minHeight: 44, borderRadius: 99, border: "1px solid " + (ativo ? "var(--marca)" : "var(--borda)"), background: ativo ? "var(--marca)" : "var(--fundo)", color: ativo ? "#fff" : "var(--texto)", font: "inherit", fontSize: 18, fontWeight: 600, cursor: "pointer" }}>
+      {children}
+    </button>
+  );
+}
+
+export default function Avaliacao({ params }) {
+  const supabase = createClient();
+  const [ficha, setFicha] = useState(undefined);
+  const [userId, setUserId] = useState(null);
+  const [favoritos, setFavoritos] = useState([]);
+  const [soFavoritos, setSoFavoritos] = useState(false);
+  const [avaliacoes, setAvaliacoes] = useState([]);
+  const [urls, setUrls] = useState({});
+  const [form, setForm] = useState(VAZIO);
+  const [arquivos, setArquivos] = useState([]);
+  const [autorizou, setAutorizou] = useState(false);
+  const [salvando, setSalvando] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  async function carregar() {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    setUserId(user.id);
+    const { data: f } = await supabase.from("fichas").select("*").eq("id", params.id).maybeSingle();
+    setFicha(f || null);
+    if (!f) return;
+    const { data: p } = await supabase.from("profiles").select("testes_favoritos").eq("id", user.id).maybeSingle();
+    setFavoritos(p?.testes_favoritos || []);
+    const { data: av, error } = await supabase.from("avaliacoes").select("*").eq("ficha_id", f.id).order("data", { ascending: true });
+    if (error) setMsg("Não foi possível carregar as avaliações. Confira se o arquivo supabase/avaliacao.sql foi rodado no Supabase.");
+    setAvaliacoes(av || []);
+    const caminhos = (av || []).flatMap((a) => a.fotos || []);
+    if (caminhos.length) {
+      const { data: assinadas } = await supabase.storage.from("fotos").createSignedUrls(caminhos, 3600);
+      const mapa = {};
+      (assinadas || []).forEach((s) => { if (s.signedUrl) mapa[s.path] = s.signedUrl; });
+      setUrls(mapa);
+    }
+  }
+
+  useEffect(() => { carregar(); }, [params.id]);
+
+  const regioes = useMemo(() => sugerirRegioes(ficha?.respostas || {}), [ficha]);
+  const anterior = avaliacoes.length ? avaliacoes[avaliacoes.length - 1].dados || {} : {};
+
+  function setLado(grupo, id, lado, valor) {
+    setMsg("");
+    setForm((f) => ({ ...f, [grupo]: { ...f[grupo], [id]: { ...(f[grupo][id] || {}), [lado]: valor } } }));
+  }
+  function alternarTeste(id, lado, valor) {
+    const atual = form.testes[id]?.[lado];
+    setLado("testes", id, lado, atual === valor ? "" : valor);
+  }
+  function alternarPg(r) {
+    setForm((f) => ({ ...f, pg: f.pg.includes(r) ? f.pg.filter((x) => x !== r) : [...f.pg, r] }));
+  }
+  function acrescentar(campo, texto) {
+    setForm((f) => ({ ...f, [campo]: f[campo] ? `${f[campo].trim()} ${texto}` : texto }));
+  }
+
+  async function alternarFavorito(id) {
+    const novos = favoritos.includes(id) ? favoritos.filter((x) => x !== id) : [...favoritos, id];
+    setFavoritos(novos);
+    const { error } = await supabase.from("profiles").update({ testes_favoritos: novos }).eq("id", userId);
+    if (error) setMsg("Não foi possível salvar o favorito. Confira se o arquivo supabase/avaliacao.sql foi rodado no Supabase.");
+  }
+
+  async function salvar(e) {
+    e.preventDefault();
+    setMsg("");
+    const dados = limpar(form);
+    if (!Object.keys(dados).length && !arquivos.length) return setMsg("Preencha pelo menos um item antes de salvar.");
+    if (arquivos.length && !autorizou) return setMsg("Marque que o paciente autorizou as fotos.");
+    setSalvando(true);
+    const fotos = [];
+    for (const arq of arquivos) {
+      const ext = (arq.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
+      const caminho = `${userId}/${ficha.id}/aval-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      const { error } = await supabase.storage.from("fotos").upload(caminho, arq, { contentType: arq.type });
+      if (error) { setSalvando(false); return setMsg("Não foi possível enviar uma das fotos. Tente de novo."); }
+      fotos.push(caminho);
+    }
+    const { error } = await supabase.from("avaliacoes").insert({ ficha_id: ficha.id, profissional_id: userId, dados, fotos });
+    setSalvando(false);
+    if (error) return setMsg("Não foi possível salvar a avaliação. Confira se o arquivo supabase/avaliacao.sql foi rodado no Supabase.");
+    setForm(VAZIO); setArquivos([]); setAutorizou(false);
+    setMsg("Avaliação salva!");
+    carregar();
+  }
+
+  if (ficha === undefined) return <><Topo /><main className="conteudo suave">Carregando...</main></>;
+  if (!ficha) return <><Topo /><main className="conteudo">Paciente não encontrado.</main></>;
+
+  const r = ficha.respostas || {};
+  const primeira = avaliacoes[0];
+  const ultima = avaliacoes[avaliacoes.length - 1];
+  const mudancas = avaliacoes.length >= 2 ? comparar(primeira.dados, ultima.dados) : [];
+  const reavaliacao = avaliacoes.length > 0;
+
+  return (
+    <>
+      <div className="nao-imprimir"><Topo /></div>
+      <main className="conteudo pilha">
+        {ficha.ativo === false && <div className="cartao nao-imprimir" style={{ background: "#eceff0" }}>Paciente inativo. Você ainda pode consultar e registrar avaliações; para reativar, use a ficha ou a aba Pacientes.</div>}
+
+        <div className="linha" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div>
+            <h1 style={{ margin: 0, fontSize: 22 }}>Avaliação física · {r.nome || ficha.paciente_nome}</h1>
+            <div className="suave">{r.queixa ? String(r.queixa).slice(0, 90) + " · " : ""}{avaliacoes.length} avaliação(ões) registrada(s)</div>
+          </div>
+          <div className="linha nao-imprimir">
+            <Link href={`/painel/${ficha.id}`} className="botao sec">Anamnese</Link>
+            <Link href={`/painel/${ficha.id}/evolucao`} className="botao sec">Evolução</Link>
+            <button type="button" className="botao sec" onClick={() => window.print()} disabled={!avaliacoes.length}>Imprimir / salvar PDF</button>
+          </div>
+        </div>
+
+        <p className="suave nao-imprimir" style={{ margin: 0 }}>O app apenas registra os resultados. A lista de testes é uma sugestão e não substitui o raciocínio clínico.</p>
+
+        {mudancas.length > 0 && (
+          <section className="cartao" style={{ breakInside: "avoid" }}>
+            <h2>Comparação: primeira ({dataCurta(primeira.data)}) → última ({dataCurta(ultima.data)})</h2>
+            <ul style={{ margin: 0, paddingLeft: 20 }}>
+              {mudancas.map((m) => <li key={m} style={{ padding: "3px 0" }}>{m}</li>)}
+            </ul>
+          </section>
+        )}
+        {avaliacoes.length >= 2 && !mudancas.length && (
+          <section className="cartao"><h2>Comparação</h2><p className="suave" style={{ margin: 0 }}>Nenhum item medido nas duas avaliações mudou de valor.</p></section>
+        )}
+
+        <form onSubmit={salvar} className="pilha nao-imprimir">
+          <div className="linha" style={{ justifyContent: "space-between" }}>
+            <h2 style={{ margin: 0, fontSize: 20 }}>{reavaliacao ? "Reavaliação" : "Nova avaliação"} · {dataBR(new Date())}</h2>
+            {reavaliacao && <span className="suave">Os valores da última avaliação ({dataCurta(ultima.data)}) aparecem como "antes".</span>}
+          </div>
+
+          <Secao titulo="Testes especiais" aberta>
+            <label className="linha" style={{ cursor: "pointer", minHeight: 44 }}>
+              <input type="checkbox" checked={soFavoritos} onChange={(e) => setSoFavoritos(e.target.checked)} style={{ width: 20, height: 20, accentColor: "var(--marca)" }} />
+              Mostrar só favoritos {favoritos.length ? `(${favoritos.length})` : ""}
+            </label>
+            {soFavoritos && !favoritos.length && <p className="suave" style={{ margin: 0 }}>Você ainda não tem favoritos. Toque na estrela ao lado de um teste para marcar.</p>}
+            {regioes.map((reg, ri) => {
+              const testes = soFavoritos ? reg.testes.filter((t) => favoritos.includes(t.id)) : reg.testes;
+              if (!testes.length) return null;
+              return (
+                <details key={reg.id} open={soFavoritos || reg.sugerida || (ri === 0 && !regioes.some((x) => x.sugerida))} style={{ border: "1px solid var(--linha)", borderRadius: 12 }}>
+                  <summary style={{ cursor: "pointer", padding: "12px 14px", fontWeight: 600, minHeight: 44 }}>
+                    {reg.nome}{reg.sugerida && <span className="etiqueta etq-ok" style={{ marginLeft: 8 }}>sugerida pela queixa</span>}
+                  </summary>
+                  <div style={{ padding: "0 14px 8px" }}>
+                    {testes.map((t, i) => {
+                      const ant = anterior.testes?.[t.id];
+                      const fav = favoritos.includes(t.id);
+                      return (
+                        <div key={t.id} className="linha" style={{ justifyContent: "space-between", padding: "10px 0", borderTop: i ? "1px solid var(--linha)" : 0 }}>
+                          <div className="linha" style={{ flex: "1 1 220px", flexWrap: "nowrap", gap: 6 }}>
+                            <button type="button" onClick={() => alternarFavorito(t.id)} aria-pressed={fav} aria-label={fav ? `Remover ${t.nome} dos favoritos` : `Marcar ${t.nome} como favorito`}
+                              style={{ width: 44, height: 44, flexShrink: 0, border: 0, background: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                              <svg width="22" height="22" viewBox="0 0 24 24" fill={fav ? "#b7791f" : "none"} stroke={fav ? "#b7791f" : "#6b7f80"} strokeWidth="2" strokeLinejoin="round" aria-hidden="true"><path d="M12 3l2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3 6.4 20.2l1.1-6.2L3 9.6l6.2-.9z" /></svg>
+                            </button>
+                            <div>
+                              <div>{t.nome}</div>
+                              {ant && (ant.D || ant.E) && <div className="suave" style={{ fontSize: 13 }}>antes: {ant.D ? `D${sinal(ant.D)}` : ""} {ant.E ? `E${sinal(ant.E)}` : ""}</div>}
+                            </div>
+                          </div>
+                          <div className="linha" style={{ gap: 14 }}>
+                            {["D", "E"].map((lado) => (
+                              <div key={lado} className="linha" style={{ gap: 6, flexWrap: "nowrap" }} role="group" aria-label={`${t.nome}, lado ${lado === "D" ? "direito" : "esquerdo"}`}>
+                                <span style={{ fontWeight: 600, width: 14 }}>{lado}</span>
+                                <ChipSinal ativo={form.testes[t.id]?.[lado] === "+"} onClick={() => alternarTeste(t.id, lado, "+")} rotulo={`${t.nome} ${lado === "D" ? "direito" : "esquerdo"} positivo`}>+</ChipSinal>
+                                <ChipSinal ativo={form.testes[t.id]?.[lado] === "-"} onClick={() => alternarTeste(t.id, lado, "-")} rotulo={`${t.nome} ${lado === "D" ? "direito" : "esquerdo"} negativo`}>−</ChipSinal>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </details>
+              );
+            })}
+          </Secao>
+
+          <Secao titulo="Amplitude de movimento (graus)" aberta={reavaliacao && !!anterior.adm}>
+            {ADM.map((item, i) => {
+              const ant = anterior.adm?.[item.id] || {};
+              return (
+                <div key={item.id} className="linha" style={{ justifyContent: "space-between", padding: "6px 0", borderTop: i ? "1px solid var(--linha)" : 0 }}>
+                  <span style={{ flex: "1 1 200px" }}>{item.articulacao} · {item.movimento}</span>
+                  <div className="linha">
+                    {(item.unico ? ["D"] : ["D", "E"]).map((lado) => {
+                      const id = `adm_${item.id}_${lado}`;
+                      return (
+                        <div key={lado} className="linha" style={{ gap: 6, flexWrap: "nowrap" }}>
+                          <label htmlFor={id} style={{ fontWeight: 600, minWidth: 14 }}>{item.unico ? "valor" : lado}</label>
+                          <input id={id} type="text" inputMode="numeric" style={estiloNum} placeholder={vazio(ant[lado]) ? "°" : `antes ${ant[lado]}`}
+                            value={form.adm[item.id]?.[lado] ?? ""} onChange={(e) => setLado("adm", item.id, lado, e.target.value.replace(/[^0-9,.-]/g, ""))} />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </Secao>
+
+          <Secao titulo="Força muscular (0 a 5)" aberta={reavaliacao && !!anterior.forca}>
+            {FORCA.map((item, i) => {
+              const ant = anterior.forca?.[item.id] || {};
+              return (
+                <div key={item.id} className="linha" style={{ justifyContent: "space-between", padding: "6px 0", borderTop: i ? "1px solid var(--linha)" : 0 }}>
+                  <span style={{ flex: "1 1 200px" }}>{item.nome}</span>
+                  <div className="linha">
+                    {["D", "E"].map((lado) => {
+                      const id = `forca_${item.id}_${lado}`;
+                      return (
+                        <div key={lado} className="linha" style={{ gap: 6, flexWrap: "nowrap" }}>
+                          <label htmlFor={id} style={{ fontWeight: 600, minWidth: 14 }}>{lado}</label>
+                          <select id={id} style={estiloSelect} value={form.forca[item.id]?.[lado] ?? ""} onChange={(e) => setLado("forca", item.id, lado, e.target.value)}>
+                            <option value="">{vazio(ant[lado]) ? "—" : `antes ${ant[lado]}`}</option>
+                            {[0, 1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}</option>)}
+                          </select>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </Secao>
+
+          <Secao titulo="Testes funcionais" aberta={reavaliacao && !!anterior.func}>
+            {FUNCIONAIS.map((item, i) => {
+              const ant = anterior.func?.[item.id] || {};
+              return (
+                <div key={item.id} className="linha" style={{ justifyContent: "space-between", padding: "6px 0", borderTop: i ? "1px solid var(--linha)" : 0 }}>
+                  <span style={{ flex: "1 1 200px" }}>{item.nome} <span className="suave">({item.unidade})</span></span>
+                  <div className="linha">
+                    {(item.lado ? ["D", "E"] : ["D"]).map((lado) => {
+                      const id = `func_${item.id}_${lado}`;
+                      return (
+                        <div key={lado} className="linha" style={{ gap: 6, flexWrap: "nowrap" }}>
+                          <label htmlFor={id} style={{ fontWeight: 600, minWidth: 14 }}>{item.lado ? lado : "valor"}</label>
+                          <input id={id} type="text" inputMode="decimal" style={estiloNum} placeholder={vazio(ant[lado]) ? item.unidade : `antes ${ant[lado]}`}
+                            value={form.func[item.id]?.[lado] ?? ""} onChange={(e) => setLado("func", item.id, lado, e.target.value.replace(/[^0-9,.]/g, ""))} />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </Secao>
+
+          <Secao titulo="Palpação e pontos-gatilho">
+            {anterior.pg?.length > 0 && <p className="suave" style={{ margin: 0 }}>Antes: {anterior.pg.join(", ")}</p>}
+            <div className="chips">
+              {REGIOES_CORPO.map((reg) => (
+                <label key={reg} className="chip"><input type="checkbox" checked={form.pg.includes(reg)} onChange={() => alternarPg(reg)} /><span>{reg}</span></label>
+              ))}
+            </div>
+            <div>
+              <div className="linha" style={{ justifyContent: "space-between" }}>
+                <label className="rotulo" htmlFor="pgObs" style={{ margin: 0 }}>Observações da palpação</label>
+                <BotaoMicrofone onTexto={(t) => acrescentar("pgObs", t)} />
+              </div>
+              <textarea id="pgObs" value={form.pgObs} onChange={(e) => setForm({ ...form, pgObs: e.target.value })} style={{ marginTop: 6 }} />
+            </div>
+          </Secao>
+
+          <Secao titulo="Avaliação postural">
+            <div>
+              <div className="linha" style={{ justifyContent: "space-between" }}>
+                <label className="rotulo" htmlFor="postura" style={{ margin: 0 }}>Observações posturais</label>
+                <BotaoMicrofone onTexto={(t) => acrescentar("postura", t)} />
+              </div>
+              <textarea id="postura" value={form.postura} onChange={(e) => setForm({ ...form, postura: e.target.value })} style={{ marginTop: 6 }} />
+            </div>
+            <div>
+              <label className="rotulo" htmlFor="fotos">Fotos (frente, lado e costas)</label>
+              <input id="fotos" type="file" accept="image/*" capture="environment" multiple onChange={(e) => setArquivos(Array.from(e.target.files || []))} />
+              {arquivos.length > 0 && <p className="suave" style={{ margin: "6px 0 0" }}>{arquivos.length} foto(s) selecionada(s)</p>}
+              <label className="linha" style={{ marginTop: 8, flexWrap: "nowrap", alignItems: "flex-start", fontSize: 14, cursor: "pointer" }}>
+                <input type="checkbox" checked={autorizou} onChange={(e) => setAutorizou(e.target.checked)} style={{ width: 20, height: 20, flexShrink: 0, accentColor: "var(--marca)" }} />
+                <span className="suave">O paciente autorizou fotos para acompanhamento clínico. As fotos ficam só no prontuário.</span>
+              </label>
+            </div>
+          </Secao>
+
+          <Secao titulo="Observações gerais" aberta>
+            <div className="linha" style={{ justifyContent: "space-between" }}>
+              <label className="rotulo" htmlFor="obs" style={{ margin: 0 }}>Observações</label>
+              <BotaoMicrofone onTexto={(t) => acrescentar("obs", t)} />
+            </div>
+            <textarea id="obs" value={form.obs} onChange={(e) => setForm({ ...form, obs: e.target.value })} />
+          </Secao>
+
+          {msg && <p role="status" style={{ margin: 0 }}>{msg}</p>}
+          <button className="botao" disabled={salvando}>{salvando ? "Salvando..." : reavaliacao ? "Salvar reavaliação" : "Salvar avaliação"}</button>
+        </form>
+
+        <section className="cartao">
+          <h2>Histórico de avaliações</h2>
+          {!avaliacoes.length && <p className="suave">Nenhuma avaliação registrada ainda.</p>}
+          {[...avaliacoes].reverse().map((a, i) => {
+            const d = a.dados || {};
+            const pos = positivos(d);
+            const n = contarMedidas(d);
+            return (
+              <article key={a.id} style={{ padding: "12px 0", borderTop: i ? "1px solid var(--linha)" : 0, breakInside: "avoid" }}>
+                <div className="linha" style={{ justifyContent: "space-between" }}>
+                  <b>{avaliacoes.length - i === 1 ? "Avaliação inicial" : `${avaliacoes.length - i}ª avaliação`} · {dataBR(a.data)}</b>
+                  <span className="suave">{n} medida(s)</span>
+                </div>
+                <div className="suave">Testes positivos: {pos.length ? pos.join(", ") : "nenhum"}</div>
+                {d.pg?.length > 0 && <div className="suave">Pontos-gatilho: {d.pg.join(", ")}</div>}
+                {d.pgObs && <p style={{ margin: "6px 0 0" }}><b>Palpação:</b> {d.pgObs}</p>}
+                {d.postura && <p style={{ margin: "6px 0 0" }}><b>Postura:</b> {d.postura}</p>}
+                {d.obs && <p style={{ margin: "6px 0 0" }}>{d.obs}</p>}
+                {a.fotos?.length > 0 && (
+                  <div className="linha" style={{ marginTop: 8 }}>
+                    {a.fotos.map((p) => urls[p] ? <a key={p} href={urls[p]} target="_blank" rel="noreferrer"><img src={urls[p]} alt={`Foto da avaliação de ${dataBR(a.data)}`} style={{ width: 96, height: 96, objectFit: "cover", borderRadius: 8 }} /></a> : null)}
+                  </div>
+                )}
+              </article>
+            );
+          })}
+        </section>
+      </main>
+    </>
+  );
+}
