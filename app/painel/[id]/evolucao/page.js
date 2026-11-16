@@ -32,8 +32,12 @@ function dataBR(d) {
 }
 function numOuNulo(v) {
   if (v === "" || v === null || v === undefined) return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? Math.max(0, Math.min(10, Math.round(n))) : null;
+  return Number(String(v).trim());
+}
+function dorInvalida(v) {
+  const t = String(v ?? "").trim();
+  if (!t) return false;
+  return !/^\d{1,2}$/.test(t) || Number(t) > 10;
 }
 
 export default function Evolucao({ params }) {
@@ -135,7 +139,11 @@ export default function Evolucao({ params }) {
   async function salvar(e) {
     e.preventDefault();
     setMsg("");
-    if (arquivos.length && !autorizou) return setMsg("Marque que o paciente autorizou as fotos.");
+    if (dorInvalida(form.dor_antes) || dorInvalida(form.dor_depois)) return setMsg("A dor precisa ser um número inteiro de 0 a 10.");
+    if (arquivos.length && ficha?.respostas?.fotos_ok !== true) return setMsg("O paciente não autorizou fotos na ficha. Remova as fotos para salvar.");
+    const temSinal = Object.values(form.sinais || {}).some((v) => String(v).trim());
+    const vazio = !String(form.dor_antes).trim() && !String(form.dor_depois).trim() && !temSinal && !form.tecnicas.length && !form.regioes.trim() && !form.notas.trim() && !form.orientacoes.trim() && !arquivos.length;
+    if (vazio) return setMsg("Preencha pelo menos um campo antes de salvar a evolução.");
     setSalvando(true);
     const fotos = [];
     for (const arq of arquivos) {
@@ -184,6 +192,7 @@ export default function Evolucao({ params }) {
   if (!ficha) return <><Topo /><main className="conteudo">Paciente não encontrado.</main></>;
 
   const r = ficha.respostas || {};
+  const fotosOk = r.fotos_ok === true;
   const { alertas, cuidados } = calcularAlertas(r, ficha.tecnicas || []);
   const ultima = evolucoes[0];
   const cronologica = [...evolucoes].reverse();
@@ -216,9 +225,12 @@ export default function Evolucao({ params }) {
         <section className="cartao nao-imprimir grade" style={{ gap: 16 }}>
           <div className="pilha" style={{ gap: 8 }}>
             <h2 style={{ margin: 0 }}>Link do paciente</h2>
-            {ficha.token_evolucao ? (
+            {!r.nasc ? (
+              <p className="suave" style={{ margin: 0 }}>Para proteger os dados, o link pede a data de nascimento do paciente. Esta ficha não tem data de nascimento, então o link não pode ser ativado.</p>
+            ) : ficha.token_evolucao ? (
               <>
                 <div style={{ wordBreak: "break-all", fontSize: 14, background: "var(--fundo)", border: "1px solid var(--borda)", borderRadius: 8, padding: "10px 12px" }}>{linkPaciente}</div>
+                <p className="suave" style={{ margin: 0, fontSize: 13 }}>Ao abrir, o paciente confirma a data de nascimento.</p>
                 <div className="linha">
                   <a className="botao" href={whats} target="_blank" rel="noreferrer">Enviar no WhatsApp</a>
                   <button type="button" className="botao sec" onClick={() => navigator.clipboard.writeText(linkPaciente)}>Copiar</button>
@@ -234,7 +246,7 @@ export default function Evolucao({ params }) {
           </div>
           <div className="pilha" style={{ gap: 4 }}>
             <h2 style={{ margin: "0 0 6px" }}>O que o paciente vê</h2>
-            {[["dor", "Gráfico da dor"], ["orientacoes", "Orientações para casa"], ["fotos", "Fotos"], ["notas", "Anotações clínicas da sessão"]].map(([k, nome]) => (
+            {[["dor", "Gráfico da dor"], ["orientacoes", "Orientações para casa"], ["notas", "Anotações clínicas da sessão"]].map(([k, nome]) => (
               <label key={k} className="linha" style={{ cursor: "pointer", minHeight: 36 }}>
                 <input type="checkbox" checked={!!ficha.compartilhar?.[k]} onChange={() => alternarCompartilhar(k)} style={{ width: 20, height: 20, accentColor: "var(--marca)" }} />
                 {nome}
@@ -286,12 +298,15 @@ export default function Evolucao({ params }) {
 
             <div>
               <label className="rotulo" htmlFor="fotos">Fotos da sessão</label>
-              <input id="fotos" type="file" accept="image/*" capture="environment" multiple onChange={(e) => setArquivos(Array.from(e.target.files || []))} />
-              {arquivos.length > 0 && <p className="suave" style={{ margin: "6px 0 0" }}>{arquivos.length} foto(s) selecionada(s)</p>}
-              <label className="linha" style={{ marginTop: 8, flexWrap: "nowrap", alignItems: "flex-start", fontSize: 14, cursor: "pointer" }}>
-                <input type="checkbox" checked={autorizou} onChange={(e) => setAutorizou(e.target.checked)} style={{ width: 20, height: 20, flexShrink: 0, accentColor: "var(--marca)" }} />
-                <span className="suave">O paciente autorizou fotos para acompanhamento clínico. As fotos ficam só no prontuário.</span>
-              </label>
+              {fotosOk ? (
+                <>
+                  <input id="fotos" type="file" accept="image/*" capture="environment" multiple onChange={(e) => setArquivos(Array.from(e.target.files || []))} />
+                  {arquivos.length > 0 && <p className="suave" style={{ margin: "6px 0 0" }}>{arquivos.length} foto(s) selecionada(s)</p>}
+                  <p className="suave" style={{ margin: "6px 0 0", fontSize: 13 }}>O paciente autorizou fotos na ficha. Elas ficam só no prontuário.</p>
+                </>
+              ) : (
+                <p className="suave" style={{ margin: 0, fontSize: 14 }}>O paciente não autorizou fotos na ficha de anamnese, então não é possível anexar fotos.</p>
+              )}
             </div>
 
             {msg && <p role="status" style={{ margin: 0 }}>{msg}</p>}
