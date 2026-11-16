@@ -36,6 +36,9 @@ export default function DetalheFicha({ params }) {
     (async () => {
       const { data } = await supabase.from("fichas").select("*").eq("id", params.id).maybeSingle();
       setF(data || null);
+      if (data && data.status === "respondida" && !data.vista_em) {
+        await supabase.from("fichas").update({ vista_em: new Date().toISOString() }).eq("id", data.id);
+      }
     })();
   }, [params.id]);
 
@@ -110,14 +113,14 @@ export default function DetalheFicha({ params }) {
             <dl className="respostas" style={{ margin: 0 }}>
               {et.fields.flatMap((fd, i) => {
                 if (fd.type === "sub") return [];
-                if (fd.type === "yn") return fd.items.map((it) => [<dt key={it.id + "t"}>{it.q}</dt>, <dd key={it.id + "d"}>{r[it.id] || "—"}</dd>]);
-                return [[<dt key={(fd.id || i) + "t"}>{fd.type === "consent" ? (fd.id === "lgpd" ? "Consentimento LGPD" : "Termo de consentimento") : fd.label}</dt>, <dd key={(fd.id || i) + "d"}>{formatarResposta(fd, r)}</dd>]];
+                if (fd.type === "yn") return fd.items.map((it) => [<dt key={it.id + "t"}>{it.q}</dt>, <dd key={it.id + "d"}>{r[it.id] || "—"}{r[it.id + "_outro"] ? ` — ${r[it.id + "_outro"]}` : ""}</dd>]);
+                return [[<dt key={(fd.id || i) + "t"}>{fd.type === "consent" ? (fd.id === "lgpd" ? "Consentimento LGPD" : fd.id === "fotos_ok" ? "Autorização de fotos" : "Termo de consentimento") : fd.label}</dt>, <dd key={(fd.id || i) + "d"}>{formatarResposta(fd, r)}</dd>]];
               })}
             </dl>
           </section>
         ))}
         {(() => {
-          const usados = new Set(etapas.flatMap((et) => et.fields.flatMap((fd) => fd.type === "yn" ? fd.items.map((it) => it.id) : [fd.id, fd.id + "_outro"])));
+          const usados = new Set(etapas.flatMap((et) => et.fields.flatMap((fd) => fd.type === "yn" ? fd.items.flatMap((it) => [it.id, it.id + "_outro"]) : [fd.id, fd.id + "_outro"])));
           const extras = Object.keys(r).filter((k) => !usados.has(k) && r[k] !== "" && r[k] !== null && !/_outro$/.test(k));
           if (!extras.length) return null;
           return (
