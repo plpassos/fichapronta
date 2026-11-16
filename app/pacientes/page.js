@@ -29,7 +29,7 @@ export default function Pacientes() {
   async function carregar() {
     const { data, error } = await supabase
       .from("fichas")
-      .select("id, paciente_nome, paciente_whatsapp, status, respostas, tecnicas, ativo, inativado_em, created_at, respondida_em")
+      .select("*")
       .order("paciente_nome", { ascending: true })
       .limit(2000);
     if (error) {
@@ -114,6 +114,7 @@ export default function Pacientes() {
                     <Link href={`/painel/${p.id}`} style={{ fontWeight: 600, color: "var(--texto)" }}>{r.nome || p.paciente_nome}</Link>
                     {p.ativo === false && <span className="etiqueta etq-pend">Inativo desde {dataBR(p.inativado_em)}</span>}
                     {p.status !== "respondida" && <span className="etiqueta etq-pend">Ficha pendente</span>}
+                    {p.status === "respondida" && !p.vista_em && <span className="etiqueta etq-ok">Nova</span>}
                     {alertas.length > 0 && <span className="etiqueta etq-alerta">{alertas.length} alerta{alertas.length > 1 ? "s" : ""}</span>}
                     {cuidados.length > 0 && <span className="etiqueta etq-cuidado">{cuidados.length} cuidado{cuidados.length > 1 ? "s" : ""}</span>}
                   </div>
