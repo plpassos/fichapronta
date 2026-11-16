@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
@@ -8,10 +8,13 @@ export default function Login() {
   const supabase = createClient();
   const router = useRouter();
   const [email, setEmail] = useState("");
-  const [codigo, setCodigo] = useState("");
   const [enviado, setEnviado] = useState(false);
   const [carregando, setCarregando] = useState(false);
   const [erro, setErro] = useState("");
+
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("erro")) setErro("O link expirou ou foi aberto em outro navegador. Peça um novo link e abra neste mesmo navegador.");
+  }, []);
 
   async function entrarGoogle() {
     setErro("");
@@ -22,7 +25,7 @@ export default function Login() {
     if (error) setErro("Não foi possível entrar com Google. Tente pelo e-mail.");
   }
 
-  async function enviarCodigo(e) {
+  async function enviarLink(e) {
     e.preventDefault();
     setErro("");
     setCarregando(true);
@@ -31,23 +34,11 @@ export default function Login() {
       options: { shouldCreateUser: true, emailRedirectTo: `${window.location.origin}/auth/callback` },
     });
     setCarregando(false);
-    if (error) return setErro("Não foi possível enviar o código. Confira o e-mail e tente de novo.");
+    if (error) {
+      const muitas = /rate|seconds|limit/i.test(error.message || "");
+      return setErro(muitas ? "Muitos pedidos seguidos. Espere 1 minuto e tente de novo." : "Não foi possível enviar o link. Confira o e-mail e tente de novo.");
+    }
     setEnviado(true);
-  }
-
-  async function confirmarCodigo(e) {
-    e.preventDefault();
-    setErro("");
-    setCarregando(true);
-    const { error } = await supabase.auth.verifyOtp({
-      email: email.trim(),
-      token: codigo.trim(),
-      type: "email",
-    });
-    setCarregando(false);
-    if (error) return setErro("Código inválido ou vencido. Peça um novo código.");
-    router.replace("/painel");
-    router.refresh();
   }
 
   return (
@@ -55,7 +46,7 @@ export default function Login() {
       <div>
         <div className="logo">FichaPronta</div>
         <h1 style={{ fontSize: 28, margin: "10px 0 6px" }}>Entre para ver as fichas dos seus pacientes</h1>
-        <p className="suave" style={{ margin: 0 }}>Sem senha para lembrar. Primeira vez? Entrar já cria sua conta.</p>
+        <p className="suave" style={{ margin: 0 }}>Sem senha para lembrar: enviamos um link de acesso para o seu e-mail. Primeira vez? Entrar já cria sua conta.</p>
       </div>
 
       <div className="cartao pilha">
@@ -63,22 +54,19 @@ export default function Login() {
         <div className="suave" style={{ textAlign: "center" }}>ou</div>
 
         {!enviado ? (
-          <form onSubmit={enviarCodigo} className="pilha">
+          <form onSubmit={enviarLink} className="pilha">
             <div>
               <label className="rotulo" htmlFor="email">Seu e-mail</label>
               <input id="email" type="email" required autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="voce@email.com" />
             </div>
-            <button className="botao largo" disabled={carregando}>{carregando ? "Enviando..." : "Receber código por e-mail"}</button>
+            <button className="botao largo" disabled={carregando}>{carregando ? "Enviando..." : "Receber link de acesso"}</button>
           </form>
         ) : (
-          <form onSubmit={confirmarCodigo} className="pilha">
-            <div>
-              <label className="rotulo" htmlFor="codigo">Código enviado para {email}</label>
-              <input id="codigo" type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={8} required value={codigo} onChange={(e) => setCodigo(e.target.value)} placeholder="000000" />
-            </div>
-            <button className="botao largo" disabled={carregando}>{carregando ? "Conferindo..." : "Entrar"}</button>
-            <button type="button" className="botao sec largo" onClick={() => { setEnviado(false); setCodigo(""); }}>Usar outro e-mail</button>
-          </form>
+          <div className="pilha" role="status">
+            <p style={{ margin: 0, fontSize: 17 }}><b>Enviamos um link para {email}.</b></p>
+            <p className="suave" style={{ margin: 0 }}>Abra o e-mail <b>neste mesmo aparelho e navegador</b> e toque em “Log In” para entrar. Não chegou? Olhe a caixa de spam e as Promoções.</p>
+            <button type="button" className="botao sec largo" onClick={() => setEnviado(false)}>Usar outro e-mail</button>
+          </div>
         )}
         {erro && <p className="erro" role="alert">{erro}</p>}
       </div>
