@@ -77,6 +77,7 @@ export default function Configurar() {
           <p className="suave" style={{ margin: 0 }}>O termo vai citar: {nomesTecnicas(tecnicas).join(", ") || "nenhuma técnica"}.</p>
           <button type="button" className="botao" onClick={salvar}>Salvar ficha</button>
           {msg && <p role="status" style={{ margin: 0 }}>{msg}</p>}
+          {msg === "Ficha salva!" && <a className="botao sec" href="/painel">Agora envie sua primeira ficha →</a>}
         </aside>
       </main>
     </>
