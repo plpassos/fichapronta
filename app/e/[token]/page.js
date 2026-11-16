@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
 function dataBR(d) {
@@ -10,39 +10,66 @@ function dataBR(d) {
 export default function EvolucaoPaciente({ params }) {
   const supabase = createClient();
   const [info, setInfo] = useState(undefined);
-  const [urls, setUrls] = useState({});
+  const [dia, setDia] = useState("");
+  const [mes, setMes] = useState("");
+  const [ano, setAno] = useState("");
+  const [erro, setErro] = useState("");
+  const [tentativas, setTentativas] = useState(0);
+  const [carregando, setCarregando] = useState(false);
+  const mesRef = useRef(null);
+  const anoRef = useRef(null);
 
-  useEffect(() => {
-    (async () => {
-      const { data } = await supabase.rpc("evolucao_publica", { p_token: params.token });
-      setInfo(data || null);
-      const caminhos = (data?.evolucoes || []).flatMap((e) => e.fotos || []);
-      if (caminhos.length) {
-        const { data: assinadas } = await supabase.storage.from("fotos").createSignedUrls(caminhos, 3600);
-        const mapa = {};
-        (assinadas || []).forEach((s) => { if (s.signedUrl) mapa[s.path] = s.signedUrl; });
-        setUrls(mapa);
-      }
-    })();
-  }, [params.token]);
+  async function entrar(e) {
+    e.preventDefault();
+    setErro("");
+    if (tentativas >= 5) return setErro("Muitas tentativas. Peça um novo link ao seu profissional.");
+    const d = +dia, m = +mes, a = +ano;
+    if (!(d >= 1 && d <= 31 && m >= 1 && m <= 12 && String(ano).length === 4)) return setErro("Confira a data: dia, mês e ano com 4 números.");
+    const nasc = `${a}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    setCarregando(true);
+    const { data } = await supabase.rpc("evolucao_publica", { p_token: params.token, p_nasc: nasc });
+    setCarregando(false);
+    if (!data) {
+      setTentativas((t) => t + 1);
+      return setErro("Não encontramos. Confira a data de nascimento ou peça um novo link ao seu profissional.");
+    }
+    setInfo(data);
+  }
 
-  if (info === undefined) return <main className="ficha-corpo suave">Carregando...</main>;
-  if (!info) return <main className="ficha-corpo">Este link não está mais ativo. Fale com o seu profissional.</main>;
+  if (!info) {
+    const estilo = { textAlign: "center", fontSize: 22 };
+    return (
+      <main className="ficha-corpo pilha" style={{ maxWidth: 440 }}>
+        <div className="cartao pilha">
+          <h1 style={{ margin: 0, fontSize: 24 }}>Sua evolução no tratamento</h1>
+          <p className="suave" style={{ margin: 0 }}>Para proteger os seus dados, confirme a sua data de nascimento.</p>
+          <form onSubmit={entrar} className="pilha">
+            <div className="linha" style={{ flexWrap: "nowrap", gap: 10 }}>
+              <div style={{ flex: 1 }}><label className="rotulo" htmlFor="d">Dia</label><input id="d" type="text" inputMode="numeric" maxLength={2} value={dia} style={estilo} onChange={(e) => { const v = e.target.value.replace(/\D/g, ""); setDia(v); if (v.length === 2) mesRef.current?.focus(); }} /></div>
+              <div style={{ flex: 1 }}><label className="rotulo" htmlFor="m">Mês</label><input id="m" ref={mesRef} type="text" inputMode="numeric" maxLength={2} value={mes} style={estilo} onChange={(e) => { const v = e.target.value.replace(/\D/g, ""); setMes(v); if (v.length === 2) anoRef.current?.focus(); }} /></div>
+              <div style={{ flex: 1.4 }}><label className="rotulo" htmlFor="a">Ano</label><input id="a" ref={anoRef} type="text" inputMode="numeric" maxLength={4} value={ano} style={estilo} onChange={(e) => setAno(e.target.value.replace(/\D/g, ""))} /></div>
+            </div>
+            <p className="erro" role="alert" style={{ margin: 0, minHeight: 22 }}>{erro}</p>
+            <button className="botao largo" disabled={carregando}>{carregando ? "Conferindo..." : "Ver minha evolução"}</button>
+          </form>
+        </div>
+      </main>
+    );
+  }
 
   const ev = info.evolucoes || [];
-  const comDor = ev.filter((e) => e.dor_depois !== null && e.dor_depois !== undefined);
-  const primeira = ev.find((e) => e.dor_antes !== null && e.dor_antes !== undefined);
+  const comDor = ev.filter((e) => e.dor_antes !== null || e.dor_depois !== null);
+  const ultima = comDor[comDor.length - 1];
   const ultimaOri = [...ev].reverse().find((e) => e.orientacoes);
-  const fotos = ev.flatMap((e) => (e.fotos || []).map((p) => ({ p, data: e.data })));
   const nome = info.paciente_nome.split(" ")[0];
 
   return (
     <>
-      <header className="cabeca-paciente nao-imprimir-cor">
+      <header className="cabeca-paciente">
         <div style={{ maxWidth: 640, margin: "0 auto" }}>
           <div className="mini">{info.profissional.nome}{info.profissional.profissao ? ` · ${info.profissional.profissao}` : ""}</div>
           <h1>Olá, {nome}! Esta é a sua evolução</h1>
-          <p>{ev.length} sessões{ev.length ? ` desde ${dataBR(ev[0].data)}` : ""}</p>
+          <p>{ev.length === 1 ? "1 sessão" : `${ev.length} sessões`}{ev.length ? ` desde ${dataBR(ev[0].data)}` : ""}</p>
         </div>
       </header>
       <main className="ficha-corpo pilha">
@@ -50,14 +77,21 @@ export default function EvolucaoPaciente({ params }) {
 
         {comDor.length > 0 && (
           <section className="cartao">
-            <div className="linha" style={{ justifyContent: "space-between" }}>
-              <h2 style={{ margin: 0 }}>Sua dor</h2>
-              {primeira && <b style={{ color: "var(--marca)" }}>de {primeira.dor_antes} para {comDor[comDor.length - 1].dor_depois}</b>}
+            <h2 style={{ margin: "0 0 4px" }}>Sua dor em cada sessão</h2>
+            {ultima && <p className="suave" style={{ margin: 0 }}>Na última sessão: {ultima.dor_antes ?? "—"} antes e {ultima.dor_depois ?? "—"} depois do atendimento (0 = sem dor, 10 = pior dor).</p>}
+            <div role="img" aria-label={"Dor antes e depois de cada sessão: " + comDor.map((e, i) => `${i + 1}ª sessão, ${e.dor_antes ?? "sem registro"} antes e ${e.dor_depois ?? "sem registro"} depois`).join("; ")} style={{ display: "flex", alignItems: "flex-end", gap: 14, height: 120, marginTop: 14, borderBottom: "1px solid var(--linha)" }}>
+              {comDor.map((e, i) => (
+                <div key={i} style={{ flex: 1, maxWidth: 90, display: "flex", gap: 4, alignItems: "flex-end", height: "100%" }}>
+                  <div style={{ flex: 1, height: `${Math.max((e.dor_antes ?? 0) * 10, 2)}%`, background: "#B9CBCA", borderRadius: "4px 4px 0 0" }} />
+                  <div style={{ flex: 1, height: `${Math.max((e.dor_depois ?? 0) * 10, 2)}%`, background: "var(--marca)", borderRadius: "4px 4px 0 0" }} />
+                </div>
+              ))}
             </div>
-            <div role="img" aria-label={"Dor depois de cada sessão: " + comDor.map((e) => e.dor_depois).join(", ")} style={{ display: "flex", alignItems: "flex-end", gap: 12, height: 110, marginTop: 12, borderBottom: "1px solid var(--linha)" }}>
-              {comDor.map((e, i) => <div key={i} style={{ flex: 1, height: `${Math.max(e.dor_depois * 10, 3)}%`, background: "var(--marca)", borderRadius: "4px 4px 0 0" }} />)}
+            <div style={{ display: "flex", gap: 14, fontSize: 12 }} className="suave">{comDor.map((e, i) => <span key={i} style={{ flex: 1, maxWidth: 90, textAlign: "center" }}>{i + 1}ª · {dataBR(e.data)}</span>)}</div>
+            <div className="linha suave" style={{ marginTop: 8, fontSize: 13, gap: 16 }}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><span style={{ width: 12, height: 12, borderRadius: 3, background: "#B9CBCA" }} />Antes da sessão</span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><span style={{ width: 12, height: 12, borderRadius: 3, background: "var(--marca)" }} />Depois da sessão</span>
             </div>
-            <div style={{ display: "flex", gap: 12, fontSize: 12 }} className="suave">{comDor.map((e, i) => <span key={i} style={{ flex: 1, textAlign: "center" }}>{dataBR(e.data)}</span>)}</div>
           </section>
         )}
 
@@ -65,20 +99,6 @@ export default function EvolucaoPaciente({ params }) {
           <section className="cartao">
             <h2>Para fazer em casa</h2>
             <p style={{ margin: 0, whiteSpace: "pre-wrap" }}>{ultimaOri.orientacoes}</p>
-          </section>
-        )}
-
-        {fotos.length > 0 && (
-          <section className="cartao">
-            <h2>Fotos</h2>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-              {fotos.map((f) => urls[f.p] ? (
-                <figure key={f.p} style={{ margin: 0 }}>
-                  <img src={urls[f.p]} alt={`Foto de ${dataBR(f.data)}`} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", borderRadius: 10 }} />
-                  <figcaption className="suave" style={{ fontSize: 12 }}>{dataBR(f.data)}</figcaption>
-                </figure>
-              ) : null)}
-            </div>
           </section>
         )}
 
