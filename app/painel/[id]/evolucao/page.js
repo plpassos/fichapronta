@@ -16,6 +16,24 @@ const SINAIS = [
   { id: "gli", nome: "Glicemia (mg/dL)", ph: "" },
 ];
 
+const FAIXAS = { fc: [20, 250, "Freq. cardíaca"], spo2: [50, 100, "Saturação"], fr: [4, 60, "Freq. respiratória"], temp: [30, 43, "Temperatura"], gli: [20, 600, "Glicemia"] };
+function erroSinais(sinais) {
+  for (const [k, bruto] of Object.entries(sinais || {})) {
+    const v = String(bruto).trim();
+    if (!v) continue;
+    if (k === "pa") {
+      const m = v.match(/^(\d{2,3})\s*[\/x]\s*(\d{2,3})$/i);
+      if (!m || +m[1] < 60 || +m[1] > 260 || +m[2] < 30 || +m[2] > 160 || +m[2] >= +m[1]) return "Confira a pressão: use o formato 120/80.";
+      continue;
+    }
+    const n = Number(v.replace(",", "."));
+    const [min, max, nome] = FAIXAS[k] || [];
+    if (!min) continue;
+    if (!/^\d+([.,]\d+)?$/.test(v) || n < min || n > max) return `Confira ${nome}: use só números (entre ${min} e ${max}).`;
+  }
+  return "";
+}
+
 const FRASES_PADRAO = {
   notas: ["Paciente relata melhora desde a última sessão.", "Sem intercorrências durante a sessão.", "Boa tolerância às técnicas aplicadas."],
   orientacoes: ["Manter as orientações da sessão anterior.", "Evitar esforço intenso nas próximas 24 horas."],
@@ -141,6 +159,8 @@ export default function Evolucao({ params }) {
     setMsg("");
     if (dorInvalida(form.dor_antes) || dorInvalida(form.dor_depois)) return setMsg("A dor precisa ser um número inteiro de 0 a 10.");
     if (arquivos.length && ficha?.respostas?.fotos_ok !== true) return setMsg("O paciente não autorizou fotos na ficha. Remova as fotos para salvar.");
+    const eS = erroSinais(form.sinais);
+    if (eS) return setMsg(eS);
     const temSinal = Object.values(form.sinais || {}).some((v) => String(v).trim());
     const vazio = !String(form.dor_antes).trim() && !String(form.dor_depois).trim() && !temSinal && !form.tecnicas.length && !form.regioes.trim() && !form.notas.trim() && !form.orientacoes.trim() && !arquivos.length;
     if (vazio) return setMsg("Preencha pelo menos um campo antes de salvar a evolução.");
