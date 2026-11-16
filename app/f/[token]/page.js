@@ -99,6 +99,7 @@ function Escala({ f, valor, set }) {
       {valor !== undefined && valor !== null && (
         <div role="status" style={{ fontSize: "1.2em", fontWeight: 700, color: CORES_DOR[valor] }}>{valor} — {textoDor(valor, f.ends)}</div>
       )}
+      {(valor === undefined || valor === null) && <div aria-hidden="true" style={{ fontSize: "1.2em", lineHeight: 1.5 }}>&nbsp;</div>}
     </div>
   );
 }
@@ -371,6 +372,8 @@ export default function FichaPaciente({ params }) {
   async function enviar() {
     const e = erroDoPasso(passos[iFinal], data);
     if (e) return setErro(e);
+    if (!nomeCompleto(data.nome)) { setRevisando(true); return setErro("Confira seu nome completo em “Seus dados”, na revisão."); }
+    if (data.tel && !telValido(data.tel)) { setRevisando(true); return setErro("Confira seu WhatsApp em “Seus dados”, na revisão."); }
     const faltando = passos.slice(0, iFinal).findIndex((p) => erroDoPasso(p, data));
     if (faltando >= 0) { irPara(faltando); return setErro(erroDoPasso(passos[faltando], data)); }
     setEnviando(true);
@@ -446,6 +449,14 @@ export default function FichaPaciente({ params }) {
         <main className="ficha-corpo pilha">
           <h1 ref={topo} tabIndex={-1} style={{ margin: "8px 0 0", fontSize: 26, outline: "none" }}>Confira suas respostas</h1>
           <p className="suave" style={{ margin: 0 }}>Se algo estiver errado, toque em <b>Alterar</b>.</p>
+          {(!passos.some((x) => x.tipo === "campo" && x.campo.id === "nome") || !passos.some((x) => x.tipo === "campo" && x.campo.id === "tel")) && (
+            <section className="cartao pilha">
+              <h2 style={{ margin: 0 }}>Seus dados</h2>
+              <p className="suave" style={{ margin: 0 }}>Preenchidos pelo profissional. Corrija se algo estiver errado.</p>
+              <div><label className="rotulo" htmlFor="rev_nome">Nome completo</label><input id="rev_nome" type="text" value={data.nome || ""} onChange={(e) => set("nome", e.target.value)} /></div>
+              <div><label className="rotulo" htmlFor="rev_tel">WhatsApp (com DDD)</label><input id="rev_tel" type="tel" inputMode="tel" value={data.tel || ""} onChange={(e) => set("tel", e.target.value)} /></div>
+            </section>
+          )}
           {secoes.map((s) => (
             <section key={s} className="cartao">
               <h2>{s}</h2>
@@ -464,7 +475,8 @@ export default function FichaPaciente({ params }) {
               {s === "Segurança" && <p className="suave" style={{ margin: "8px 0 0", fontSize: 14 }}>As perguntas respondidas com "Não" não aparecem aqui.</p>}
             </section>
           ))}
-          <button type="button" className="botao largo" style={{ minHeight: 58, fontSize: "1.1em" }} onClick={() => irPara(iFinal)}>Está tudo certo, continuar</button>
+          <p className="erro" role="alert" style={{ margin: 0, minHeight: "1.5em" }}>{erro}</p>
+          <button type="button" className="botao largo" style={{ minHeight: 58, fontSize: "1.1em" }} onClick={() => { if (!nomeCompleto(data.nome)) return setErro("Confira seu nome completo em “Seus dados”."); if (data.tel && !telValido(data.tel)) return setErro("Confira seu WhatsApp em “Seus dados”: DDD + número."); irPara(iFinal); }}>Está tudo certo, continuar</button>
         </main>
       </div>
     );
