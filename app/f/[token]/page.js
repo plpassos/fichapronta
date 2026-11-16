@@ -42,12 +42,23 @@ function respondido(p, data) {
   return Array.isArray(v) ? v.length > 0 : v !== undefined && v !== null && String(v).trim() !== "";
 }
 
+function nomeCompleto(v) {
+  const partes = String(v || "").trim().split(/\s+/).filter((x) => /[A-Za-zÀ-ÿ]{2,}/.test(x));
+  return partes.length >= 2;
+}
+function telValido(v) {
+  const d = String(v || "").replace(/\D/g, "").replace(/^55(?=\d{10,11}$)/, "");
+  return d.length === 10 || d.length === 11;
+}
 function erroDoPasso(p, data) {
   if (p.tipo === "yn" && !data[p.item.id]) return "Escolha Sim, Não ou Não sei.";
   if (p.tipo === "final") {
-    if (!data.termo || !data.lgpd) return "Marque as duas caixinhas para continuar.";
-    if (!String(data.assinatura || "").trim()) return "Escreva seu nome completo.";
+    if (!data.termo || !data.lgpd) return "Marque as caixinhas obrigatórias para continuar.";
+    if (!nomeCompleto(data.assinatura)) return "Escreva seu nome e sobrenome.";
   }
+  if (p.tipo === "campo" && p.campo.id === "nome" && data.nome && !nomeCompleto(data.nome)) return "Escreva seu nome e sobrenome.";
+  if (p.tipo === "campo" && p.campo.type === "tel" && data[p.campo.id] && !telValido(data[p.campo.id])) return "Confira o número: DDD + celular, por exemplo (11) 98765-4321.";
+  if (p.tipo === "campo" && p.campo.id === "dor_pior" && typeof data.dor_pior === "number" && typeof data.dor_hoje === "number" && data.dor_pior < data.dor_hoje) return `A pior dor da semana não pode ser menor que a de hoje (${data.dor_hoje}). Confira.`;
   if (p.tipo === "campo" && p.campo.req && !respondido(p, data)) return "Essa resposta é obrigatória.";
   if (p.tipo === "campo" && p.campo.type === "data3" && data.nasc === "invalida") return "Confira a data: dia, mês e ano.";
   return "";
@@ -102,7 +113,7 @@ function Boneco({ titulo, vista, selecionadas, alternar }) {
     else {
       const d = vista === "f" ? c.r : espelho;
       const e = vista === "f" ? espelho : c.r;
-      formas.push({ nome: `${c.nome} direito`, r: d }, { nome: `${c.nome} esquerdo`, r: e });
+      formas.push({ nome: `${c.nome} (lado direito)`, r: d }, { nome: `${c.nome} (lado esquerdo)`, r: e });
     }
   }
   return (
@@ -153,6 +164,8 @@ function Data3({ valor, set }) {
   const [dia, setDia] = useState(d);
   const [mes, setMes] = useState(m);
   const [ano, setAno] = useState(a);
+  const mesRef = useRef(null);
+  const anoRef = useRef(null);
   useEffect(() => {
     if (!dia && !mes && !ano) return set("nasc", "");
     const di = +dia, me = +mes, an = +ano;
@@ -162,9 +175,9 @@ function Data3({ valor, set }) {
   const estilo = { textAlign: "center", fontSize: "1.3em" };
   return (
     <div className="linha" style={{ flexWrap: "nowrap", gap: 10 }}>
-      <div style={{ flex: 1 }}><label className="rotulo" htmlFor="nasc_d">Dia</label><input id="nasc_d" type="text" inputMode="numeric" maxLength={2} placeholder="15" value={dia} onChange={(e) => setDia(e.target.value.replace(/\D/g, ""))} style={estilo} /></div>
-      <div style={{ flex: 1 }}><label className="rotulo" htmlFor="nasc_m">Mês</label><input id="nasc_m" type="text" inputMode="numeric" maxLength={2} placeholder="03" value={mes} onChange={(e) => setMes(e.target.value.replace(/\D/g, ""))} style={estilo} /></div>
-      <div style={{ flex: 1.4 }}><label className="rotulo" htmlFor="nasc_a">Ano</label><input id="nasc_a" type="text" inputMode="numeric" maxLength={4} placeholder="1960" value={ano} onChange={(e) => setAno(e.target.value.replace(/\D/g, ""))} style={estilo} /></div>
+      <div style={{ flex: 1 }}><label className="rotulo" htmlFor="nasc_d">Dia</label><input id="nasc_d" type="text" inputMode="numeric" maxLength={2} placeholder="15" value={dia} onChange={(e) => { const v = e.target.value.replace(/\D/g, ""); setDia(v); if (v.length === 2) mesRef.current?.focus(); }} style={estilo} /></div>
+      <div style={{ flex: 1 }}><label className="rotulo" htmlFor="nasc_m">Mês</label><input id="nasc_m" ref={mesRef} type="text" inputMode="numeric" maxLength={2} placeholder="03" value={mes} onChange={(e) => { const v = e.target.value.replace(/\D/g, ""); setMes(v); if (v.length === 2) anoRef.current?.focus(); }} style={estilo} /></div>
+      <div style={{ flex: 1.4 }}><label className="rotulo" htmlFor="nasc_a">Ano</label><input id="nasc_a" ref={anoRef} type="text" inputMode="numeric" maxLength={4} placeholder="1960" value={ano} onChange={(e) => setAno(e.target.value.replace(/\D/g, ""))} style={estilo} /></div>
     </div>
   );
 }
@@ -187,8 +200,9 @@ function Campo({ f, data, set, avancar }) {
       }
       const lista = v || [];
       let nova = lista.includes(o) ? lista.filter((x) => x !== o) : [...lista, o];
-      if (o === "Nenhuma" && nova.includes("Nenhuma")) nova = ["Nenhuma"];
-      else if (o !== "Nenhuma") nova = nova.filter((x) => x !== "Nenhuma");
+      const EXCL = ["Nenhuma", "Nada melhora"];
+      if (EXCL.includes(o) && nova.includes(o)) nova = [o];
+      else if (!EXCL.includes(o)) nova = nova.filter((x) => !EXCL.includes(x));
       set(f.id, nova);
     };
     const mostrarOutro = f.other && (multi ? (v || []).includes(f.other) : v === f.other);
@@ -230,7 +244,7 @@ function Final({ etapa, data, set }) {
             <details style={{ marginBottom: 12 }}><summary style={{ cursor: "pointer", color: "var(--marca)", minHeight: 32 }}>Ler o texto completo</summary><p style={{ margin: "8px 0 0", fontSize: 14 }}>{f.label}</p></details>
             <label className="linha" style={{ flexWrap: "nowrap", alignItems: "center", cursor: "pointer", fontWeight: 600 }}>
               <input type="checkbox" checked={!!data[f.id]} onChange={(e) => set(f.id, e.target.checked)} style={{ width: 28, height: 28, flexShrink: 0, accentColor: "var(--marca)" }} />
-              <span>{f.id === "lgpd" ? "Autorizo" : "Li e concordo"}</span>
+              <span>{f.botao || "Li e concordo"}</span>
             </label>
           </div>
         ) : (
@@ -258,6 +272,8 @@ export default function FichaPaciente({ params }) {
   const [letraGrande, setLetraGrande] = useState(false);
   const timer = useRef(null);
   const dataRef = useRef({});
+  const passoRef = useRef(-1);
+  useEffect(() => { passoRef.current = passo; }, [passo]);
   const revRef = useRef(false);
   useEffect(() => { dataRef.current = data; }, [data]);
   useEffect(() => { revRef.current = voltarRevisao; }, [voltarRevisao]);
@@ -275,12 +291,27 @@ export default function FichaPaciente({ params }) {
     (async () => {
       const { data: d } = await supabase.rpc("ficha_publica", { p_token: params.token });
       setInfo(d || null);
+      if (d && d.status !== "respondida") {
+        setData((atual) => {
+          const novo = { ...atual };
+          if (!novo.nome && nomeCompleto(d.paciente_nome)) novo.nome = d.paciente_nome;
+          if (!novo.tel && telValido(d.paciente_whatsapp)) novo.tel = d.paciente_whatsapp;
+          dataRef.current = novo;
+          return novo;
+        });
+      }
     })();
     return () => clearTimeout(timer.current);
   }, [params.token]);
 
   const prof = info?.profissional;
-  const passos = useMemo(() => (prof ? montarPassos(montarEtapas(prof.tecnicas || [], prof.opcionais || {})) : []), [prof]);
+  const passos = useMemo(() => {
+    if (!prof) return [];
+    const pular = new Set();
+    if (nomeCompleto(info.paciente_nome)) pular.add("nome");
+    if (telValido(info.paciente_whatsapp)) pular.add("tel");
+    return montarPassos(montarEtapas(prof.tecnicas || [], prof.opcionais || {})).filter((x) => !(x.tipo === "campo" && pular.has(x.campo.id)));
+  }, [prof, info]);
   const iFinal = passos.length - 1;
 
   function guardar(novoData, novoPasso) {
@@ -315,6 +346,8 @@ export default function FichaPaciente({ params }) {
   function avancarAuto() {
     clearTimeout(timer.current);
     timer.current = setTimeout(() => {
+      const e = passos[passoRef.current] ? erroDoPasso(passos[passoRef.current], dataRef.current) : "";
+      if (e) { setErro(e); return; }
       setPasso((p) => {
         if (revRef.current) { setVoltarRevisao(false); setRevisando(true); return p; }
         if (p + 1 >= iFinal) { setRevisando(true); return p; }
@@ -442,6 +475,7 @@ export default function FichaPaciente({ params }) {
   const dica = p.tipo === "yn" ? DICAS[p.item.id] : p.tipo === "campo" ? p.campo.hint : p.etapa.intro;
   const ehFinal = p.tipo === "final";
   const autoAvanca = p.tipo === "yn" || (p.tipo === "campo" && (p.campo.type === "scale" || (p.campo.type === "radio" && !(p.campo.other && data[p.campo.id] === p.campo.other))));
+  const obrigatorio = p.tipo === "yn" || p.tipo === "final" || (p.tipo === "campo" && !!p.campo.req);
   const pct = Math.round(((passo + 1) / passos.length) * 100);
 
   return (
@@ -450,12 +484,12 @@ export default function FichaPaciente({ params }) {
         <div style={{ maxWidth: 640, margin: "0 auto" }}>
           <div className="mini">{prof.nome}</div>
           <div className="linha" style={{ justifyContent: "space-between", marginTop: 8, fontSize: 14, color: "#e6f6f5" }}>
-            <span>{p.secao}</span><span>{passo + 1} de {passos.length}</span>
+            <span>{p.secao}</span><span>{ehFinal ? "Última etapa" : `Pergunta ${passo + 1} de ${passos.length - 1}`}</span>
           </div>
           <div style={{ height: 8, background: "rgba(255,255,255,.25)", borderRadius: 99, marginTop: 6 }}><div style={{ width: `${pct}%`, height: 8, background: "#fff", borderRadius: 99 }} /></div>
         </div>
       </header>
-      <main className="ficha-corpo pilha">
+      <main className="ficha-corpo pilha" onKeyDown={(e) => { if (e.key === "Enter" && e.target.tagName === "INPUT" && e.target.type !== "checkbox") { e.preventDefault(); ehFinal ? enviar() : proximo(); } }}>
         {barra}
         <section className="cartao pilha" style={{ padding: "22px 18px" }}>
           {p.sub && <div style={{ background: "var(--marca-clara)", borderRadius: 10, padding: "10px 12px" }}><b>{p.sub.title}</b><div style={{ fontSize: 14 }}>{p.sub.intro}</div></div>}
@@ -467,7 +501,13 @@ export default function FichaPaciente({ params }) {
 
           {p.tipo === "yn" && (
             <div className="pilha" style={{ gap: 10 }}>
-              <Chips nome={p.item.id} opts={["Sim", "Não", "Não sei"]} valor={data[p.item.id]} onToggle={(o) => { set(p.item.id, o); avancarAuto(); }} grande />
+              <Chips nome={p.item.id} opts={["Sim", "Não", "Não sei"]} valor={data[p.item.id]} onToggle={(o) => { set(p.item.id, o); if (!(p.item.detalhe && o === "Sim")) avancarAuto(); }} grande />
+              {p.item.detalhe && data[p.item.id] === "Sim" && (
+                <div>
+                  <label className="rotulo" htmlFor={p.item.id + "_outro"}>{p.item.detalhe}</label>
+                  <textarea id={p.item.id + "_outro"} value={data[p.item.id + "_outro"] || ""} onChange={(e) => set(p.item.id + "_outro", e.target.value)} style={{ minHeight: 70 }} />
+                </div>
+              )}
               {p.item.adapta && data[p.item.id] === "Sim" && <div className="nota">O profissional vai adaptar: {p.item.adapta}.</div>}
             </div>
           )}
@@ -475,7 +515,7 @@ export default function FichaPaciente({ params }) {
           {ehFinal && <Final etapa={p.etapa} data={data} set={set} />}
         </section>
 
-        {erro && <p className="erro" role="alert" style={{ margin: 0, fontSize: "1.05em" }}>{erro}</p>}
+        <p className="erro" role="alert" style={{ margin: 0, fontSize: "1.05em", minHeight: "3em" }}>{erro}</p>
 
         <div className="linha" style={{ flexWrap: "nowrap" }}>
           <button type="button" className="botao sec" style={{ flex: 1, minHeight: 56 }} onClick={() => (passo === 0 ? irPara(-1) : irPara(passo - 1))}>Voltar</button>
@@ -483,7 +523,7 @@ export default function FichaPaciente({ params }) {
             <button type="button" className="botao" style={{ flex: 2, minHeight: 56, fontSize: "1.1em" }} onClick={enviar} disabled={enviando}>{enviando ? "Enviando..." : "Enviar ficha"}</button>
           ) : (
             <button type="button" className="botao" style={{ flex: 2, minHeight: 56, fontSize: "1.1em" }} onClick={proximo}>
-              {voltarRevisao ? "Voltar para a revisão" : respondido(p, data) || !autoAvanca ? (respondido(p, data) ? "Próxima" : "Pular") : "Pular"}
+              {voltarRevisao ? "Voltar para a revisão" : respondido(p, data) || obrigatorio ? "Próxima" : "Pular"}
             </button>
           )}
         </div>
