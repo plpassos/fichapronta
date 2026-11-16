@@ -36,6 +36,10 @@ export default function Cadastro() {
   async function salvar(e) {
     e.preventDefault();
     setErro("");
+    const partes = form.nome.trim().split(/\s+/).filter((x) => /[A-Za-zÀ-ÿ]{2,}/.test(x));
+    if (partes.length < 2) return setErro("Escreva seu nome e sobrenome, como o paciente vai ver (ex.: Lucas Passos).");
+    const wa = form.whatsapp.replace(/\D/g, "").replace(/^55(?=\d{10,11}$)/, "");
+    if (wa && wa.length !== 10 && wa.length !== 11) return setErro("Confira o WhatsApp: use DDD + número, por exemplo (11) 98765-4321.");
     setSalvando(true);
     const { data: { user } } = await supabase.auth.getUser();
     const dados = { id: user.id, ...form, slug: limparSlug(form.slug || form.nome) || null };
