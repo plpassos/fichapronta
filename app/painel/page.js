@@ -29,6 +29,7 @@ export default function Painel() {
   const [tel, setTel] = useState("");
   const [gerado, setGerado] = useState(null);
   const [erro, setErro] = useState("");
+  const [novas, setNovas] = useState([]);
 
   async function carregar() {
     const { data: { user } } = await supabase.auth.getUser();
@@ -37,6 +38,7 @@ export default function Painel() {
     setPerfil(p);
     const { data } = await supabase.from("fichas").select("*").order("created_at", { ascending: false }).limit(100);
     setFichas((data || []).filter((f) => f.ativo !== false && f.status !== "respondida"));
+    setNovas((data || []).filter((f) => f.ativo !== false && f.status === "respondida" && !f.vista_em));
   }
 
   useEffect(() => { carregar(); }, []);
@@ -44,6 +46,9 @@ export default function Painel() {
   async function criar(e) {
     e.preventDefault();
     setErro("");
+    const dig = tel.replace(/\D/g, "").replace(/^55(?=\d{10,11}$)/, "");
+    if (dig.length < 10 || dig.length > 11) return setErro("Confira o WhatsApp: use DDD + número, por exemplo (11) 98765-4321.");
+    if (nome.trim().length < 2) return setErro("Escreva o nome do paciente.");
     const token = gerarToken();
     const { error } = await supabase.from("fichas").insert({
       profissional_id: perfil.id, token, paciente_nome: nome.trim(), paciente_whatsapp: tel.trim(), modo: "formulario",
@@ -87,7 +92,27 @@ export default function Painel() {
           )}
         </section>
 
-        <section className="cartao" style={{ gridColumn: "span 2", minWidth: 0 }}>
+        <section className="pilha" style={{ gridColumn: "span 2", minWidth: 0 }}>
+        {novas.length > 0 && (
+          <div className="cartao" style={{ borderColor: "#7FD6A4", background: "#F0FAF4" }} role="status">
+            <h2 style={{ margin: "0 0 4px" }}>{novas.length === 1 ? "1 ficha nova respondida" : `${novas.length} fichas novas respondidas`}</h2>
+            <p className="suave" style={{ margin: "0 0 8px" }}>Toque para ver. Depois de aberta, ela fica só na aba Pacientes.</p>
+            {novas.map((f) => {
+              const { alertas, cuidados } = calcularAlertas(f.respostas || {}, f.tecnicas || []);
+              return (
+                <Link key={f.id} href={`/painel/${f.id}`} className="item-ficha">
+                  <div className="linha" style={{ justifyContent: "space-between" }}><b>{f.paciente_nome}</b><span className="suave">respondida {quando(f.respondida_em)}</span></div>
+                  <div className="linha" style={{ marginTop: 6, gap: 6 }}>
+                    <span className="etiqueta etq-ok">Nova</span>
+                    {alertas.length > 0 && <span className="etiqueta etq-alerta">{alertas.length} alerta{alertas.length > 1 ? "s" : ""}</span>}
+                    {cuidados.length > 0 && <span className="etiqueta etq-cuidado">{cuidados.length} cuidado{cuidados.length > 1 ? "s" : ""}</span>}
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        )}
+        <div className="cartao">
           <h2>Aguardando resposta do formulário</h2>
           {!fichas.length && <p className="suave">Nenhum paciente aguardando resposta. Os pacientes que já responderam ficam na aba Pacientes.</p>}
           {fichas.map((f) => {
@@ -108,6 +133,7 @@ export default function Painel() {
               </Link>
             );
           })}
+        </div>
         </section>
       </main>
     </>
