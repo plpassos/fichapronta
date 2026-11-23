@@ -106,10 +106,10 @@ function comparar(a = {}, b = {}) {
 const estiloNum = { width: 84, minHeight: 44, padding: "8px 10px", borderRadius: 10, border: "1px solid var(--borda)", background: "var(--fundo)", font: "inherit", fontSize: 16, color: "var(--texto)" };
 const estiloSelect = { ...estiloNum, width: 84 };
 
-function Secao({ titulo, aberta, children }) {
+function Secao({ titulo, aberta, n, children }) {
   return (
     <details open={aberta} className="cartao" style={{ padding: 0 }}>
-      <summary style={{ cursor: "pointer", padding: "16px 20px", fontSize: 17, fontWeight: 600, minHeight: 44 }}>{titulo}</summary>
+      <summary style={{ cursor: "pointer", padding: "14px 18px", fontSize: 16, fontWeight: 600, minHeight: 44 }}>{titulo}{n > 0 && <span className="etiqueta etq-ok" style={{ marginLeft: 8 }}>{n} preenchido{n > 1 ? "s" : ""}</span>}</summary>
       <div className="pilha" style={{ padding: "0 20px 20px" }}>{children}</div>
     </details>
   );
@@ -134,7 +134,6 @@ export default function Avaliacao({ params }) {
   const [urls, setUrls] = useState({});
   const [form, setForm] = useState(VAZIO);
   const [arquivos, setArquivos] = useState([]);
-  const [autorizou, setAutorizou] = useState(false);
   const [salvando, setSalvando] = useState(false);
   const [msg, setMsg] = useState("");
 
@@ -191,7 +190,7 @@ export default function Avaliacao({ params }) {
     setMsg("");
     const dados = limpar(form);
     if (!Object.keys(dados).length && !arquivos.length) return setMsg("Preencha pelo menos um item antes de salvar.");
-    if (arquivos.length && !autorizou) return setMsg("Marque que o paciente autorizou as fotos.");
+    if (arquivos.length && ficha?.respostas?.fotos_ok !== true) return setMsg("O paciente não autorizou fotos na ficha.");
     setSalvando(true);
     const fotos = [];
     for (const arq of arquivos) {
@@ -204,7 +203,7 @@ export default function Avaliacao({ params }) {
     const { error } = await supabase.from("avaliacoes").insert({ ficha_id: ficha.id, profissional_id: userId, dados, fotos });
     setSalvando(false);
     if (error) return setMsg("Não foi possível salvar a avaliação. Confira se o arquivo supabase/avaliacao.sql foi rodado no Supabase.");
-    setForm(VAZIO); setArquivos([]); setAutorizou(false);
+    setForm(VAZIO); setArquivos([]);
     setMsg("Avaliação salva!");
     carregar();
   }
@@ -222,41 +221,36 @@ export default function Avaliacao({ params }) {
     <>
       <div className="nao-imprimir"><Topo /></div>
       <main className="conteudo pilha">
-        {ficha.ativo === false && <div className="cartao nao-imprimir" style={{ background: "#eceff0" }}>Paciente inativo. Você ainda pode consultar e registrar avaliações; para reativar, use a ficha ou a aba Pacientes.</div>}
+        {ficha.ativo === false && <div className="cartao nao-imprimir" style={{ background: "#eceff0" }}>Paciente inativo. Você ainda pode registrar avaliações.</div>}
 
         <div className="linha" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
           <div>
-            <h1 style={{ margin: 0, fontSize: 22 }}>Avaliação física · {r.nome || ficha.paciente_nome}</h1>
-            <div className="suave">{r.queixa ? String(r.queixa).slice(0, 90) + " · " : ""}{avaliacoes.length} avaliação(ões) registrada(s)</div>
+            <h1 style={{ margin: 0, fontSize: 22 }}>{r.nome || ficha.paciente_nome}</h1>
+            <div className="suave" style={{ fontSize: 14 }}>Avaliação física · {avaliacoes.length === 1 ? "1 avaliação" : `${avaliacoes.length} avaliações`}</div>
           </div>
           <div className="linha nao-imprimir">
             <Link href={`/painel/${ficha.id}`} className="botao sec">Anamnese</Link>
             <Link href={`/painel/${ficha.id}/evolucao`} className="botao sec">Evolução</Link>
-            <button type="button" className="botao sec" onClick={() => window.print()} disabled={!avaliacoes.length}>Imprimir / salvar PDF</button>
+            <button type="button" className="botao sec" onClick={() => { document.querySelectorAll("details").forEach((d) => (d.open = true)); setTimeout(() => window.print(), 50); }} disabled={!avaliacoes.length}>PDF</button>
           </div>
         </div>
 
-        <p className="suave nao-imprimir" style={{ margin: 0 }}>O app apenas registra os resultados. A lista de testes é uma sugestão e não substitui o raciocínio clínico.</p>
-
         {mudancas.length > 0 && (
           <section className="cartao" style={{ breakInside: "avoid" }}>
-            <h2>Comparação: primeira ({dataCurta(primeira.data)}) → última ({dataCurta(ultima.data)})</h2>
+            <h2 style={{ marginTop: 0 }}>O que mudou ({dataCurta(primeira.data)} → {dataCurta(ultima.data)})</h2>
             <ul style={{ margin: 0, paddingLeft: 20 }}>
               {mudancas.map((m) => <li key={m} style={{ padding: "3px 0" }}>{m}</li>)}
             </ul>
           </section>
         )}
-        {avaliacoes.length >= 2 && !mudancas.length && (
-          <section className="cartao"><h2>Comparação</h2><p className="suave" style={{ margin: 0 }}>Nenhum item medido nas duas avaliações mudou de valor.</p></section>
-        )}
 
         <form onSubmit={salvar} className="pilha nao-imprimir">
           <div className="linha" style={{ justifyContent: "space-between" }}>
             <h2 style={{ margin: 0, fontSize: 20 }}>{reavaliacao ? "Reavaliação" : "Nova avaliação"} · {dataBR(new Date())}</h2>
-            {reavaliacao && <span className="suave">Os valores da última avaliação ({dataCurta(ultima.data)}) aparecem como "antes".</span>}
+            {reavaliacao && <span className="suave" style={{ fontSize: 13 }}>"antes" = {dataCurta(ultima.data)}</span>}
           </div>
 
-          <Secao titulo="Testes especiais" aberta>
+          <Secao titulo="Testes especiais" aberta n={Object.values(form.testes).filter((v) => v.D || v.E).length}>
             <label className="linha" style={{ cursor: "pointer", minHeight: 44 }}>
               <input type="checkbox" checked={soFavoritos} onChange={(e) => setSoFavoritos(e.target.checked)} style={{ width: 20, height: 20, accentColor: "var(--marca)" }} />
               Mostrar só favoritos {favoritos.length ? `(${favoritos.length})` : ""}
@@ -304,7 +298,7 @@ export default function Avaliacao({ params }) {
             })}
           </Secao>
 
-          <Secao titulo="Amplitude de movimento (graus)" aberta={reavaliacao && !!anterior.adm}>
+          <Secao titulo="Amplitude de movimento" n={Object.values(form.adm).filter((v) => !vazio(v.D) || !vazio(v.E)).length}>
             {ADM.map((item, i) => {
               const ant = anterior.adm?.[item.id] || {};
               return (
@@ -327,7 +321,7 @@ export default function Avaliacao({ params }) {
             })}
           </Secao>
 
-          <Secao titulo="Força muscular (0 a 5)" aberta={reavaliacao && !!anterior.forca}>
+          <Secao titulo="Força muscular (0 a 5)" n={Object.values(form.forca).filter((v) => !vazio(v.D) || !vazio(v.E)).length}>
             {FORCA.map((item, i) => {
               const ant = anterior.forca?.[item.id] || {};
               return (
@@ -352,7 +346,7 @@ export default function Avaliacao({ params }) {
             })}
           </Secao>
 
-          <Secao titulo="Testes funcionais" aberta={reavaliacao && !!anterior.func}>
+          <Secao titulo="Testes funcionais" n={Object.values(form.func).filter((v) => !vazio(v.D) || !vazio(v.E)).length}>
             {FUNCIONAIS.map((item, i) => {
               const ant = anterior.func?.[item.id] || {};
               return (
@@ -375,7 +369,7 @@ export default function Avaliacao({ params }) {
             })}
           </Secao>
 
-          <Secao titulo="Palpação e pontos-gatilho">
+          <Secao titulo="Palpação e postura" n={form.pg.length + (form.pgObs.trim() ? 1 : 0) + (form.postura.trim() ? 1 : 0) + arquivos.length}>
             {anterior.pg?.length > 0 && <p className="suave" style={{ margin: 0 }}>Antes: {anterior.pg.join(", ")}</p>}
             <div className="chips">
               {REGIOES_CORPO.map((reg) => (
@@ -389,9 +383,6 @@ export default function Avaliacao({ params }) {
               </div>
               <textarea id="pgObs" value={form.pgObs} onChange={(e) => setForm({ ...form, pgObs: e.target.value })} style={{ marginTop: 6 }} />
             </div>
-          </Secao>
-
-          <Secao titulo="Avaliação postural">
             <div>
               <div className="linha" style={{ justifyContent: "space-between" }}>
                 <label className="rotulo" htmlFor="postura" style={{ margin: 0 }}>Observações posturais</label>
@@ -400,17 +391,17 @@ export default function Avaliacao({ params }) {
               <textarea id="postura" value={form.postura} onChange={(e) => setForm({ ...form, postura: e.target.value })} style={{ marginTop: 6 }} />
             </div>
             <div>
-              <label className="rotulo" htmlFor="fotos">Fotos (frente, lado e costas)</label>
-              <input id="fotos" type="file" accept="image/*" capture="environment" multiple onChange={(e) => setArquivos(Array.from(e.target.files || []))} />
-              {arquivos.length > 0 && <p className="suave" style={{ margin: "6px 0 0" }}>{arquivos.length} foto(s) selecionada(s)</p>}
-              <label className="linha" style={{ marginTop: 8, flexWrap: "nowrap", alignItems: "flex-start", fontSize: 14, cursor: "pointer" }}>
-                <input type="checkbox" checked={autorizou} onChange={(e) => setAutorizou(e.target.checked)} style={{ width: 20, height: 20, flexShrink: 0, accentColor: "var(--marca)" }} />
-                <span className="suave">O paciente autorizou fotos para acompanhamento clínico. As fotos ficam só no prontuário.</span>
-              </label>
+              <label className="rotulo" htmlFor="fotos">Fotos posturais (frente, lado e costas)</label>
+              {r.fotos_ok === true ? (
+                <>
+                  <input id="fotos" type="file" accept="image/*" capture="environment" multiple onChange={(e) => setArquivos(Array.from(e.target.files || []))} />
+                  {arquivos.length > 0 && <p className="suave" style={{ margin: "6px 0 0" }}>{arquivos.length} foto(s) selecionada(s)</p>}
+                </>
+              ) : <p className="suave" style={{ margin: 0, fontSize: 14 }}>O paciente não autorizou fotos na ficha.</p>}
             </div>
           </Secao>
 
-          <Secao titulo="Observações gerais" aberta>
+          <Secao titulo="Observações gerais" n={form.obs.trim() ? 1 : 0}>
             <div className="linha" style={{ justifyContent: "space-between" }}>
               <label className="rotulo" htmlFor="obs" style={{ margin: 0 }}>Observações</label>
               <BotaoMicrofone onTexto={(t) => acrescentar("obs", t)} />
@@ -423,32 +414,35 @@ export default function Avaliacao({ params }) {
         </form>
 
         <section className="cartao">
-          <h2>Histórico de avaliações</h2>
+          <h2 style={{ marginTop: 0 }}>Avaliações anteriores</h2>
           {!avaliacoes.length && <p className="suave">Nenhuma avaliação registrada ainda.</p>}
           {[...avaliacoes].reverse().map((a, i) => {
             const d = a.dados || {};
             const pos = positivos(d);
             const n = contarMedidas(d);
             return (
-              <article key={a.id} style={{ padding: "12px 0", borderTop: i ? "1px solid var(--linha)" : 0, breakInside: "avoid" }}>
-                <div className="linha" style={{ justifyContent: "space-between" }}>
-                  <b>{avaliacoes.length - i === 1 ? "Avaliação inicial" : `${avaliacoes.length - i}ª avaliação`} · {dataBR(a.data)}</b>
-                  <span className="suave">{n} medida(s)</span>
-                </div>
-                <div className="suave">Testes positivos: {pos.length ? pos.join(", ") : "nenhum"}</div>
+              <details key={a.id} open={i === 0} style={{ borderTop: i ? "1px solid var(--linha)" : 0, breakInside: "avoid" }}>
+                <summary style={{ cursor: "pointer", minHeight: 44, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <b>{avaliacoes.length - i === 1 ? "Inicial" : `${avaliacoes.length - i}ª`} · {dataCurta(a.data)}</b>
+                  <span className="suave" style={{ fontSize: 14 }}>{n} medida(s){pos.length ? ` · ${pos.length} teste(s) positivo(s)` : ""}</span>
+                </summary>
+                <div style={{ paddingBottom: 12, fontSize: 15 }}>
+                {pos.length > 0 && <div className="suave">Positivos: {pos.join(", ")}</div>}
                 {d.pg?.length > 0 && <div className="suave">Pontos-gatilho: {d.pg.join(", ")}</div>}
                 {d.pgObs && <p style={{ margin: "6px 0 0" }}><b>Palpação:</b> {d.pgObs}</p>}
                 {d.postura && <p style={{ margin: "6px 0 0" }}><b>Postura:</b> {d.postura}</p>}
                 {d.obs && <p style={{ margin: "6px 0 0" }}>{d.obs}</p>}
                 {a.fotos?.length > 0 && (
                   <div className="linha" style={{ marginTop: 8 }}>
-                    {a.fotos.map((p) => urls[p] ? <a key={p} href={urls[p]} target="_blank" rel="noreferrer"><img src={urls[p]} alt={`Foto da avaliação de ${dataBR(a.data)}`} style={{ width: 96, height: 96, objectFit: "cover", borderRadius: 8 }} /></a> : null)}
+                    {a.fotos.map((p) => urls[p] ? <a key={p} href={urls[p]} target="_blank" rel="noreferrer"><img src={urls[p]} alt={`Foto da avaliação de ${dataBR(a.data)}`} style={{ width: 80, height: 80, objectFit: "cover", borderRadius: 8 }} /></a> : null)}
                   </div>
                 )}
-              </article>
+                </div>
+              </details>
             );
           })}
         </section>
+        <p className="suave nao-imprimir" style={{ margin: 0, fontSize: 13, textAlign: "center" }}>Os testes são sugestões e não substituem o raciocínio clínico.</p>
       </main>
     </>
   );
