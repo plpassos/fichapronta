@@ -221,157 +221,170 @@ export default function Evolucao({ params }) {
   if (tel && !tel.startsWith("55")) tel = "55" + tel;
   const whats = `https://wa.me/${tel}?text=${encodeURIComponent(`Olá, ${ficha.paciente_nome.split(" ")[0]}! Aqui você acompanha a sua evolução no tratamento: ${linkPaciente}`)}`;
 
+  function imprimir() {
+    document.querySelectorAll("details").forEach((d) => (d.open = true));
+    setTimeout(() => window.print(), 50);
+  }
+  const nomeTec = (ids) => TECNICAS.filter((t) => ids.includes(t.id)).map((t) => t.nome.split(" (")[0]).join(", ");
+  const extrasPreenchidos = [form.regioes.trim() && "regiões", Object.values(form.sinais || {}).some((v) => String(v).trim()) && "sinais vitais", arquivos.length && "fotos"].filter(Boolean);
+  const comDor = cronologica.filter((e) => e.dor_antes !== null || e.dor_depois !== null).slice(-8);
+  const sumario = { cursor: "pointer", fontWeight: 600, minHeight: 44, display: "flex", alignItems: "center" };
+
   return (
     <>
       <div className="nao-imprimir"><Topo /></div>
       <main className="conteudo pilha">
-        {ficha.ativo === false && <div className="cartao nao-imprimir" style={{ background: "#eceff0" }}>Paciente inativo. Você ainda pode consultar e registrar evoluções; para reativar, use a ficha ou a aba Pacientes.</div>}
+        {ficha.ativo === false && <div className="cartao nao-imprimir" style={{ background: "#eceff0" }}>Paciente inativo. Você ainda pode registrar evoluções.</div>}
+
         <div className="linha" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
           <div>
             <h1 style={{ margin: 0, fontSize: 22 }}>{r.nome || ficha.paciente_nome}</h1>
-            <div className="suave">
-              {r.queixa ? String(r.queixa).slice(0, 80) + " · " : ""}{evolucoes.length} sessões registradas
-              {alertas.length > 0 && <> · <b style={{ color: "var(--alerta)" }}>{alertas.length} alerta(s)</b></>}
-              {cuidados.length > 0 && <> · <b style={{ color: "var(--cuidado)" }}>{cuidados.length} cuidado(s)</b></>}
+            <div className="suave" style={{ fontSize: 14 }}>
+              {evolucoes.length === 1 ? "1 sessão" : `${evolucoes.length} sessões`}
+              {ultima && (ultima.dor_antes !== null || ultima.dor_depois !== null) && <> · última dor {ultima.dor_antes ?? "—"} → {ultima.dor_depois ?? "—"}</>}
             </div>
           </div>
-          <div className="linha nao-imprimir">
-            <Link href={`/painel/${ficha.id}`} className="botao sec">Ver anamnese</Link>
-            <Link href={`/painel/${ficha.id}/avaliacao`} className="botao sec">Avaliação física</Link>
-            <button type="button" className="botao sec" onClick={() => window.print()} disabled={!evolucoes.length}>Exportar todas em PDF</button>
+          <div className="linha nao-imprimir" style={{ gap: 8 }}>
+            <Link href={`/painel/${ficha.id}`} className="botao sec">Anamnese</Link>
+            <Link href={`/painel/${ficha.id}/avaliacao`} className="botao sec">Avaliação</Link>
+            <button type="button" className="botao sec" onClick={imprimir} disabled={!evolucoes.length}>PDF</button>
           </div>
         </div>
 
-        <section className="cartao nao-imprimir grade" style={{ gap: 16 }}>
-          <div className="pilha" style={{ gap: 8 }}>
-            <h2 style={{ margin: 0 }}>Link do paciente</h2>
-            {!r.nasc ? (
-              <p className="suave" style={{ margin: 0 }}>Para proteger os dados, o link pede a data de nascimento do paciente. Esta ficha não tem data de nascimento, então o link não pode ser ativado.</p>
-            ) : ficha.token_evolucao ? (
-              <>
-                <div style={{ wordBreak: "break-all", fontSize: 14, background: "var(--fundo)", border: "1px solid var(--borda)", borderRadius: 8, padding: "10px 12px" }}>{linkPaciente}</div>
-                <p className="suave" style={{ margin: 0, fontSize: 13 }}>Ao abrir, o paciente confirma a data de nascimento.</p>
-                <div className="linha">
-                  <a className="botao" href={whats} target="_blank" rel="noreferrer">Enviar no WhatsApp</a>
-                  <button type="button" className="botao sec" onClick={() => navigator.clipboard.writeText(linkPaciente)}>Copiar</button>
-                  <button type="button" className="botao sec" onClick={desativarLink}>Desativar link</button>
-                </div>
-              </>
-            ) : (
-              <>
-                <p className="suave" style={{ margin: 0 }}>O paciente acompanha a própria evolução por um link privado.</p>
-                <button type="button" className="botao" onClick={ativarLink}>Compartilhar com o paciente</button>
-              </>
-            )}
+        {(alertas.length > 0 || cuidados.length > 0) && (
+          <div className="nota nao-imprimir" style={{ margin: 0 }}>
+            {alertas.length > 0 && <div><b style={{ color: "var(--alerta)" }}>Alerta:</b> {alertas.map((a) => a.resumo || a.titulo || a).join("; ")}</div>}
+            {cuidados.length > 0 && <div><b style={{ color: "var(--cuidado)" }}>Cuidado:</b> {cuidados.map((c) => `${c.resumo} → adaptar ${c.adapta}`).join("; ")}</div>}
           </div>
-          <div className="pilha" style={{ gap: 4 }}>
-            <h2 style={{ margin: "0 0 6px" }}>O que o paciente vê</h2>
-            {[["dor", "Gráfico da dor"], ["orientacoes", "Orientações para casa"], ["notas", "Anotações clínicas da sessão"]].map(([k, nome]) => (
-              <label key={k} className="linha" style={{ cursor: "pointer", minHeight: 36 }}>
-                <input type="checkbox" checked={!!ficha.compartilhar?.[k]} onChange={() => alternarCompartilhar(k)} style={{ width: 20, height: 20, accentColor: "var(--marca)" }} />
-                {nome}
-              </label>
-            ))}
-          </div>
-        </section>
+        )}
 
         <div className="grade">
           <form onSubmit={salvar} className="cartao pilha nao-imprimir">
             <div className="linha" style={{ justifyContent: "space-between" }}>
-              <h2 style={{ margin: 0 }}>Nova evolução · {dataBR(new Date())}</h2>
-              {evolucoes.length > 0 && <button type="button" className="botao sec" onClick={repetirUltima}>Repetir última evolução</button>}
+              <h2 style={{ margin: 0 }}>Nova sessão · {dataBR(new Date())}</h2>
+              {evolucoes.length > 0 && <button type="button" className="botao sec" onClick={repetirUltima}>Repetir última</button>}
             </div>
             {aviso && <p role="status" className="suave" style={{ margin: 0 }}>{aviso}</p>}
             <div className="linha" style={{ flexWrap: "nowrap" }}>
-              <div style={{ flex: 1 }}><label className="rotulo" htmlFor="da">Dor antes (0–10)</label><input id="da" type="text" inputMode="numeric" {...campo("dor_antes")} /></div>
-              <div style={{ flex: 1 }}><label className="rotulo" htmlFor="dd">Dor depois (0–10)</label><input id="dd" type="text" inputMode="numeric" {...campo("dor_depois")} /></div>
+              <div style={{ flex: 1 }}><label className="rotulo" htmlFor="da">Dor antes</label><input id="da" type="text" inputMode="numeric" placeholder="0–10" {...campo("dor_antes")} /></div>
+              <div style={{ flex: 1 }}><label className="rotulo" htmlFor="dd">Dor depois</label><input id="dd" type="text" inputMode="numeric" placeholder="0–10" {...campo("dor_depois")} /></div>
             </div>
 
-            <fieldset style={{ border: "1px solid var(--linha)", borderRadius: 12, padding: 14, margin: 0 }}>
-              <legend style={{ fontWeight: 600, padding: "0 6px" }}>Sinais vitais (opcional)</legend>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10 }}>
-                {SINAIS.map((s) => (
-                  <div key={s.id}>
-                    <label className="rotulo" htmlFor={"s_" + s.id} style={{ fontSize: 13 }}>{s.nome}</label>
-                    <input id={"s_" + s.id} type="text" inputMode="decimal" placeholder={s.ph} value={form.sinais[s.id] || ""} onChange={(e) => setForm({ ...form, sinais: { ...form.sinais, [s.id]: e.target.value } })} />
-                  </div>
-                ))}
-              </div>
-              {ultima && Object.keys(ultima.sinais || {}).length > 0 && (
-                <p className="suave" style={{ margin: "10px 0 0" }}>Última sessão: {SINAIS.filter((s) => ultima.sinais[s.id]).map((s) => `${s.nome.split(" (")[0]} ${ultima.sinais[s.id]}`).join(" · ")}</p>
-              )}
-            </fieldset>
-
             <div>
-              <div className="rotulo">Técnicas usadas hoje</div>
+              <div className="rotulo">Técnicas</div>
               <div className="chips">
                 {TECNICAS.filter((t) => (ficha.tecnicas || []).length === 0 || (ficha.tecnicas || []).includes(t.id)).map((t) => (
                   <label key={t.id} className="chip"><input type="checkbox" checked={form.tecnicas.includes(t.id)} onChange={() => alternarTecnica(t.id)} /><span>{t.nome.split(" (")[0]}</span></label>
                 ))}
               </div>
-              {cuidados.length > 0 && <div className="nota" style={{ marginTop: 8 }}>Lembrete da ficha: {cuidados.map((c) => `${c.resumo} → adaptar ${c.adapta}`).join("; ")}.</div>}
             </div>
 
-            <div><div className="linha" style={{ justifyContent: "space-between", marginBottom: 6 }}><label className="rotulo" htmlFor="reg" style={{ margin: 0 }}>Regiões tratadas</label><BotaoMicrofone onTexto={(t) => anexar("regioes", t)} /></div><input id="reg" type="text" {...campo("regioes")} /></div>
             <div><div className="linha" style={{ justifyContent: "space-between", marginBottom: 6 }}><label className="rotulo" htmlFor="notas" style={{ margin: 0 }}>Como foi a sessão</label><BotaoMicrofone onTexto={(t) => anexar("notas", t)} /></div><textarea id="notas" {...campo("notas")} /><Frases k="notas" /></div>
-            <div><div className="linha" style={{ justifyContent: "space-between", marginBottom: 6 }}><label className="rotulo" htmlFor="ori" style={{ margin: 0 }}>Orientações para casa</label><BotaoMicrofone onTexto={(t) => anexar("orientacoes", t)} /></div><textarea id="ori" {...campo("orientacoes")} /><Frases k="orientacoes" /></div>
+            <div><div className="linha" style={{ justifyContent: "space-between", marginBottom: 6 }}><label className="rotulo" htmlFor="ori" style={{ margin: 0 }}>Para casa</label><BotaoMicrofone onTexto={(t) => anexar("orientacoes", t)} /></div><textarea id="ori" {...campo("orientacoes")} style={{ minHeight: 70 }} /><Frases k="orientacoes" /></div>
 
-            <div>
-              <label className="rotulo" htmlFor="fotos">Fotos da sessão</label>
-              {fotosOk ? (
-                <>
-                  <input id="fotos" type="file" accept="image/*" capture="environment" multiple onChange={(e) => setArquivos(Array.from(e.target.files || []))} />
-                  {arquivos.length > 0 && <p className="suave" style={{ margin: "6px 0 0" }}>{arquivos.length} foto(s) selecionada(s)</p>}
-                  <p className="suave" style={{ margin: "6px 0 0", fontSize: 13 }}>O paciente autorizou fotos na ficha. Elas ficam só no prontuário.</p>
-                </>
-              ) : (
-                <p className="suave" style={{ margin: 0, fontSize: 14 }}>O paciente não autorizou fotos na ficha de anamnese, então não é possível anexar fotos.</p>
-              )}
-            </div>
+            <details style={{ border: "1px solid var(--linha)", borderRadius: 12, padding: "0 14px" }}>
+              <summary style={sumario}>Mais detalhes{extrasPreenchidos.length ? ` · ${extrasPreenchidos.join(", ")}` : " (regiões, sinais vitais, fotos)"}</summary>
+              <div className="pilha" style={{ paddingBottom: 14 }}>
+                <div><div className="linha" style={{ justifyContent: "space-between", marginBottom: 6 }}><label className="rotulo" htmlFor="reg" style={{ margin: 0 }}>Regiões tratadas</label><BotaoMicrofone onTexto={(t) => anexar("regioes", t)} /></div><input id="reg" type="text" {...campo("regioes")} /></div>
+                <div>
+                  <div className="rotulo">Sinais vitais</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10 }}>
+                    {SINAIS.map((s) => (
+                      <div key={s.id}>
+                        <label className="suave" htmlFor={"s_" + s.id} style={{ fontSize: 13 }}>{s.nome}</label>
+                        <input id={"s_" + s.id} type="text" inputMode="decimal" placeholder={ultima?.sinais?.[s.id] || s.ph} value={form.sinais[s.id] || ""} onChange={(e) => setForm({ ...form, sinais: { ...form.sinais, [s.id]: e.target.value } })} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="rotulo" htmlFor="fotos">Fotos</label>
+                  {fotosOk ? (
+                    <>
+                      <input id="fotos" type="file" accept="image/*" capture="environment" multiple onChange={(e) => setArquivos(Array.from(e.target.files || []))} />
+                      {arquivos.length > 0 && <p className="suave" style={{ margin: "6px 0 0" }}>{arquivos.length} foto(s) selecionada(s)</p>}
+                    </>
+                  ) : (
+                    <p className="suave" style={{ margin: 0, fontSize: 14 }}>O paciente não autorizou fotos na ficha.</p>
+                  )}
+                </div>
+              </div>
+            </details>
 
             {msg && <p role="status" style={{ margin: 0 }}>{msg}</p>}
             <button className="botao" disabled={salvando}>{salvando ? "Salvando..." : "Salvar evolução"}</button>
           </form>
 
           <section className="pilha" style={{ minWidth: 0 }}>
-            {cronologica.some((e) => e.dor_antes !== null || e.dor_depois !== null) && (
+            {comDor.length > 0 && (
               <div className="cartao">
-                <h2>Dor ao longo das sessões</h2>
-                <div role="img" aria-label={"Dor antes e depois por sessão: " + cronologica.map((e, i) => `${i + 1}ª ${e.dor_antes ?? "-"} para ${e.dor_depois ?? "-"}`).join(", ")} style={{ display: "flex", alignItems: "flex-end", gap: 12, height: 150, borderBottom: "1px solid var(--linha)" }}>
-                  {cronologica.map((e) => (
-                    <div key={e.id} style={{ flex: 1, display: "flex", gap: 3, alignItems: "flex-end", height: "100%" }}>
-                      <div style={{ flex: 1, height: `${(e.dor_antes ?? 0) * 10}%`, background: "#9fb5b4", borderRadius: "4px 4px 0 0" }} />
-                      <div style={{ flex: 1, height: `${(e.dor_depois ?? 0) * 10}%`, background: "var(--marca)", borderRadius: "4px 4px 0 0" }} />
+                <div className="linha" style={{ justifyContent: "space-between" }}>
+                  <h2 style={{ margin: 0 }}>Dor por sessão</h2>
+                  <span className="suave" style={{ fontSize: 13 }}><span style={{ color: "#9fb5b4" }}>■</span> antes <span style={{ color: "var(--marca)" }}>■</span> depois</span>
+                </div>
+                <div role="img" aria-label={"Dor antes e depois por sessão: " + comDor.map((e) => `${e.dor_antes ?? "-"} para ${e.dor_depois ?? "-"}`).join(", ")} style={{ display: "flex", alignItems: "flex-end", gap: 10, height: 90, marginTop: 10, borderBottom: "1px solid var(--linha)" }}>
+                  {comDor.map((e) => (
+                    <div key={e.id} style={{ flex: 1, maxWidth: 48, display: "flex", gap: 2, alignItems: "flex-end", height: "100%" }}>
+                      <div style={{ flex: 1, height: `${Math.max((e.dor_antes ?? 0) * 10, 2)}%`, background: "#9fb5b4", borderRadius: "3px 3px 0 0" }} />
+                      <div style={{ flex: 1, height: `${Math.max((e.dor_depois ?? 0) * 10, 2)}%`, background: "var(--marca)", borderRadius: "3px 3px 0 0" }} />
                     </div>
                   ))}
                 </div>
-                <div style={{ display: "flex", gap: 12, fontSize: 12 }} className="suave">{cronologica.map((e, i) => <span key={e.id} style={{ flex: 1, textAlign: "center" }}>{i + 1}ª</span>)}</div>
-                <div className="linha suave" style={{ marginTop: 6, fontSize: 13 }}><span>■ <span style={{ color: "#9fb5b4" }}>antes</span></span><span>■ <span style={{ color: "var(--marca)" }}>depois</span></span></div>
               </div>
             )}
 
             <div className="cartao">
-              <h2>Sessões</h2>
-              {!evolucoes.length && <p className="suave">Nenhuma evolução registrada ainda.</p>}
+              <h2 style={{ marginTop: 0 }}>Sessões</h2>
+              {!evolucoes.length && <p className="suave" style={{ margin: 0 }}>Nenhuma sessão registrada ainda.</p>}
               {evolucoes.map((e, i) => (
-                <article key={e.id} style={{ padding: "12px 0", borderTop: i ? "1px solid var(--linha)" : 0, breakInside: "avoid" }}>
-                  <div className="linha" style={{ justifyContent: "space-between" }}>
-                    <b>{evolucoes.length - i}ª sessão · {dataBR(e.data)}</b>
-                    {(e.dor_antes !== null || e.dor_depois !== null) && <span className="suave">Dor {e.dor_antes ?? "—"} → {e.dor_depois ?? "—"}</span>}
+                <details key={e.id} open={i === 0} style={{ borderTop: i ? "1px solid var(--linha)" : 0, breakInside: "avoid" }}>
+                  <summary style={{ ...sumario, fontWeight: 400, gap: 8, flexWrap: "wrap" }}>
+                    <b>{evolucoes.length - i}ª · {dataBR(e.data).slice(0, 5)}</b>
+                    {(e.dor_antes !== null || e.dor_depois !== null) && <span className="etiqueta">Dor {e.dor_antes ?? "—"}→{e.dor_depois ?? "—"}</span>}
+                    {e.tecnicas?.length > 0 && <span className="suave" style={{ fontSize: 14 }}>{nomeTec(e.tecnicas)}</span>}
+                  </summary>
+                  <div style={{ padding: "0 0 12px", fontSize: 15 }}>
+                    {e.notas && <p style={{ margin: "0 0 6px" }}>{e.notas}</p>}
+                    {e.orientacoes && <p style={{ margin: "0 0 6px" }}><b>Para casa:</b> {e.orientacoes}</p>}
+                    {e.regioes && <div className="suave">Regiões: {e.regioes}</div>}
+                    {Object.keys(e.sinais || {}).length > 0 && <div className="suave">{SINAIS.filter((s) => e.sinais[s.id]).map((s) => `${s.nome.split(" (")[0]} ${e.sinais[s.id]}`).join(" · ")}</div>}
+                    {e.fotos?.length > 0 && (
+                      <div className="linha" style={{ marginTop: 8 }}>
+                        {e.fotos.map((p) => urls[p] ? <a key={p} href={urls[p]} target="_blank" rel="noreferrer"><img src={urls[p]} alt={`Foto da sessão de ${dataBR(e.data)}`} style={{ width: 80, height: 80, objectFit: "cover", borderRadius: 8 }} /></a> : null)}
+                      </div>
+                    )}
                   </div>
-                  {Object.keys(e.sinais || {}).length > 0 && <div className="suave">{SINAIS.filter((s) => e.sinais[s.id]).map((s) => `${s.nome.split(" (")[0]}: ${e.sinais[s.id]}`).join(" · ")}</div>}
-                  {e.tecnicas?.length > 0 && <div className="suave">Técnicas: {TECNICAS.filter((t) => e.tecnicas.includes(t.id)).map((t) => t.nome.split(" (")[0]).join(", ")}</div>}
-                  {e.regioes && <div className="suave">Regiões: {e.regioes}</div>}
-                  {e.notas && <p style={{ margin: "6px 0 0" }}>{e.notas}</p>}
-                  {e.orientacoes && <p style={{ margin: "6px 0 0" }}><b>Para casa:</b> {e.orientacoes}</p>}
-                  {e.fotos?.length > 0 && (
-                    <div className="linha" style={{ marginTop: 8 }}>
-                      {e.fotos.map((p) => urls[p] ? <a key={p} href={urls[p]} target="_blank" rel="noreferrer"><img src={urls[p]} alt={`Foto da sessão de ${dataBR(e.data)}`} style={{ width: 96, height: 96, objectFit: "cover", borderRadius: 8 }} /></a> : null)}
-                    </div>
-                  )}
-                </article>
+                </details>
               ))}
             </div>
+
+            <details className="cartao nao-imprimir">
+              <summary style={sumario}>Link do paciente {ficha.token_evolucao ? <span className="etiqueta etq-ok" style={{ marginLeft: 8 }}>ativo</span> : <span className="suave" style={{ marginLeft: 8, fontWeight: 400 }}>desligado</span>}</summary>
+              <div className="pilha" style={{ gap: 10, paddingTop: 8 }}>
+                {!r.nasc ? (
+                  <p className="suave" style={{ margin: 0 }}>A ficha não tem data de nascimento, que o link usa para proteger os dados. Não é possível ativar.</p>
+                ) : ficha.token_evolucao ? (
+                  <>
+                    <div className="linha">
+                      <a className="botao" href={whats} target="_blank" rel="noreferrer">Enviar no WhatsApp</a>
+                      <button type="button" className="botao sec" onClick={() => navigator.clipboard.writeText(linkPaciente)}>Copiar link</button>
+                      <button type="button" className="botao sec" onClick={desativarLink}>Desligar</button>
+                    </div>
+                    <p className="suave" style={{ margin: 0, fontSize: 13 }}>O paciente confirma a data de nascimento ao abrir.</p>
+                  </>
+                ) : (
+                  <button type="button" className="botao" onClick={ativarLink}>Ativar link do paciente</button>
+                )}
+                <div>
+                  <div className="rotulo">O paciente vê</div>
+                  <div className="chips">
+                    {[["dor", "Gráfico da dor"], ["orientacoes", "Para casa"], ["notas", "Anotações"]].map(([k, nome]) => (
+                      <label key={k} className="chip"><input type="checkbox" checked={!!ficha.compartilhar?.[k]} onChange={() => alternarCompartilhar(k)} /><span>{nome}</span></label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </details>
           </section>
         </div>
       </main>
