@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import Topo from "@/components/Topo";
+import AbasPaciente from "@/components/AbasPaciente";
 import { BotaoMicrofone } from "@/components/Voz";
 import { ADM, FORCA, FUNCIONAIS, REGIOES_CORPO, sugerirRegioes, nomeTeste } from "@/lib/testes";
 
@@ -221,6 +221,7 @@ export default function Avaliacao({ params }) {
     <>
       <div className="nao-imprimir"><Topo /></div>
       <main className="conteudo pilha">
+        <AbasPaciente id={ficha.id} atual="avaliacao" />
         {ficha.ativo === false && <div className="cartao nao-imprimir" style={{ background: "#eceff0" }}>Paciente inativo. Você ainda pode registrar avaliações.</div>}
 
         <div className="linha" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
@@ -229,8 +230,6 @@ export default function Avaliacao({ params }) {
             <div className="suave" style={{ fontSize: 14 }}>Avaliação física · {avaliacoes.length === 1 ? "1 avaliação" : `${avaliacoes.length} avaliações`}</div>
           </div>
           <div className="linha nao-imprimir">
-            <Link href={`/painel/${ficha.id}`} className="botao sec">Anamnese</Link>
-            <Link href={`/painel/${ficha.id}/evolucao`} className="botao sec">Evolução</Link>
             <button type="button" className="botao sec" onClick={() => { document.querySelectorAll("details").forEach((d) => (d.open = true)); setTimeout(() => window.print(), 50); }} disabled={!avaliacoes.length}>PDF</button>
           </div>
         </div>

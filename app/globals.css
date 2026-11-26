@@ -102,3 +102,14 @@ input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-
 .botao-icone.gravando { background: #fdf0ef; border-color: #c0392b; color: #9b2c24; }
 .letra-grande { font-size: 19px; }
 .letra-grande .chip span, .letra-grande .botao, .letra-grande input, .letra-grande textarea { font-size: 19px; }
+
+/* Abas do paciente */
+.abas { display: flex; gap: 4px; border-bottom: 1px solid var(--linha); overflow-x: auto; }
+.abas a { flex: 0 0 auto; display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; text-decoration: none; color: var(--suave); font-weight: 500; border-bottom: 3px solid transparent; margin-bottom: -1px; }
+.abas a.ativa { color: var(--marca); border-bottom-color: var(--marca); font-weight: 600; }
+.abas a.aba-voltar { padding: 0 10px; font-size: 20px; color: var(--texto); }
+
+/* Escala de dor por toque */
+.escala-dor { display: grid; grid-template-columns: repeat(11, 1fr); gap: 4px; }
+.escala-dor button { min-height: 44px; padding: 0; border: 1px solid var(--borda); border-radius: 8px; background: var(--fundo); font: inherit; font-size: 15px; color: var(--texto); cursor: pointer; }
+.escala-dor button[aria-pressed=true] { background: var(--marca); border-color: var(--marca); color: #fff; font-weight: 700; }

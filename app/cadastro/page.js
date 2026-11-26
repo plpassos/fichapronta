@@ -48,7 +48,7 @@ export default function Cadastro() {
     if (error) {
       return setErro(error.code === "23505" ? "Esse endereço de link já está em uso. Escolha outro." : "Não foi possível salvar. Tente de novo.");
     }
-    router.push(novo ? "/configurar" : "/painel");
+    router.push(novo ? "/configurar" : "/pacientes");
   }
 
   return (

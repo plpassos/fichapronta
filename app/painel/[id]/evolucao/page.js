@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import Link from "next/link";
 import Topo from "@/components/Topo";
+import AbasPaciente from "@/components/AbasPaciente";
 import { BotaoMicrofone } from "@/components/Voz";
 import { TECNICAS, calcularAlertas } from "@/lib/ficha";
 
@@ -41,6 +42,32 @@ const FRASES_PADRAO = {
 
 const VAZIO = { dor_antes: "", dor_depois: "", sinais: {}, tecnicas: [], regioes: "", notas: "", orientacoes: "" };
 
+// Rascunho no próprio aparelho: se a tela fechar no meio da sessão, nada se perde
+const chaveRascunho = (id) => `fp-rascunho-evolucao-${id}`;
+function lerRascunho(id) {
+  try { const r = JSON.parse(localStorage.getItem(chaveRascunho(id)) || "null"); return r && typeof r === "object" ? { ...VAZIO, ...r } : null; } catch { return null; }
+}
+function gravarRascunho(id, form) {
+  try {
+    const vazio = JSON.stringify(form) === JSON.stringify(VAZIO);
+    if (vazio) localStorage.removeItem(chaveRascunho(id));
+    else localStorage.setItem(chaveRascunho(id), JSON.stringify(form));
+  } catch {}
+}
+
+function EscalaDor({ id, rotulo, valor, onChange }) {
+  return (
+    <div role="group" aria-labelledby={id}>
+      <div className="rotulo" id={id}>{rotulo}{valor !== "" && valor !== null && valor !== undefined ? `: ${valor}` : ""}</div>
+      <div className="escala-dor">
+        {Array.from({ length: 11 }, (_, n) => (
+          <button key={n} type="button" aria-pressed={String(valor) === String(n)} aria-label={`${rotulo} ${n}`} onClick={() => onChange(String(valor) === String(n) ? "" : String(n))}>{n}</button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function gerarToken() {
   const b = crypto.getRandomValues(new Uint8Array(12));
   return Array.from(b, (x) => "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"[x % 56]).join("");
@@ -72,6 +99,8 @@ export default function Evolucao({ params }) {
   const [frases, setFrases] = useState(FRASES_PADRAO);
   const [podeSalvarFrases, setPodeSalvarFrases] = useState(false);
   const [aviso, setAviso] = useState("");
+  const [salvou, setSalvou] = useState(false);
+  const [rascunhoPronto, setRascunhoPronto] = useState(false);
 
   async function carregar() {
     const { data: { user } } = await supabase.auth.getUser();
@@ -100,6 +129,13 @@ export default function Evolucao({ params }) {
   }
 
   useEffect(() => { carregar(); }, [params.id]);
+
+  useEffect(() => {
+    const r = lerRascunho(params.id);
+    if (r) { setForm(r); setAviso("Recuperamos o que você estava escrevendo nesta sessão."); }
+    setRascunhoPronto(true);
+  }, [params.id]);
+  useEffect(() => { if (rascunhoPronto) gravarRascunho(params.id, form); }, [form, rascunhoPronto, params.id]);
 
   function anexar(k, texto) {
     setForm((f) => {
@@ -156,7 +192,7 @@ export default function Evolucao({ params }) {
 
   async function salvar(e) {
     e.preventDefault();
-    setMsg("");
+    setMsg(""); setSalvou(false);
     if (dorInvalida(form.dor_antes) || dorInvalida(form.dor_depois)) return setMsg("A dor precisa ser um número inteiro de 0 a 10.");
     if (arquivos.length && ficha?.respostas?.fotos_ok !== true) return setMsg("O paciente não autorizou fotos na ficha. Remova as fotos para salvar.");
     const eS = erroSinais(form.sinais);
@@ -188,8 +224,9 @@ export default function Evolucao({ params }) {
     });
     setSalvando(false);
     if (error) return setMsg("Não foi possível salvar a evolução.");
-    setForm(VAZIO); setArquivos([]); setAutorizou(false);
-    setMsg("Evolução salva!");
+    setForm(VAZIO); setArquivos([]); setAutorizou(false); setAviso("");
+    gravarRascunho(ficha.id, VAZIO);
+    setMsg("Evolução salva!"); setSalvou(true);
     carregar();
   }
 
@@ -234,6 +271,7 @@ export default function Evolucao({ params }) {
     <>
       <div className="nao-imprimir"><Topo /></div>
       <main className="conteudo pilha">
+        <AbasPaciente id={ficha.id} atual="evolucao" />
         {ficha.ativo === false && <div className="cartao nao-imprimir" style={{ background: "#eceff0" }}>Paciente inativo. Você ainda pode registrar evoluções.</div>}
 
         <div className="linha" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
@@ -245,8 +283,6 @@ export default function Evolucao({ params }) {
             </div>
           </div>
           <div className="linha nao-imprimir" style={{ gap: 8 }}>
-            <Link href={`/painel/${ficha.id}`} className="botao sec">Anamnese</Link>
-            <Link href={`/painel/${ficha.id}/avaliacao`} className="botao sec">Avaliação</Link>
             <button type="button" className="botao sec" onClick={imprimir} disabled={!evolucoes.length}>PDF</button>
           </div>
         </div>
@@ -262,13 +298,11 @@ export default function Evolucao({ params }) {
           <form onSubmit={salvar} className="cartao pilha nao-imprimir">
             <div className="linha" style={{ justifyContent: "space-between" }}>
               <h2 style={{ margin: 0 }}>Nova sessão · {dataBR(new Date())}</h2>
-              {evolucoes.length > 0 && <button type="button" className="botao sec" onClick={repetirUltima}>Repetir última</button>}
+              {evolucoes.length > 0 && <button type="button" className="botao sec" onClick={repetirUltima}>Repetir última sessão</button>}
             </div>
             {aviso && <p role="status" className="suave" style={{ margin: 0 }}>{aviso}</p>}
-            <div className="linha" style={{ flexWrap: "nowrap" }}>
-              <div style={{ flex: 1 }}><label className="rotulo" htmlFor="da">Dor antes</label><input id="da" type="text" inputMode="numeric" placeholder="0–10" {...campo("dor_antes")} /></div>
-              <div style={{ flex: 1 }}><label className="rotulo" htmlFor="dd">Dor depois</label><input id="dd" type="text" inputMode="numeric" placeholder="0–10" {...campo("dor_depois")} /></div>
-            </div>
+            <EscalaDor id="rot-da" rotulo="Dor antes" valor={form.dor_antes} onChange={(v) => setForm((f) => ({ ...f, dor_antes: v }))} />
+            <EscalaDor id="rot-dd" rotulo="Dor depois" valor={form.dor_depois} onChange={(v) => setForm((f) => ({ ...f, dor_depois: v }))} />
 
             <div>
               <div className="rotulo">Técnicas</div>
@@ -311,7 +345,12 @@ export default function Evolucao({ params }) {
               </div>
             </details>
 
-            {msg && <p role="status" style={{ margin: 0 }}>{msg}</p>}
+            {msg && (
+              <div role="status" className="linha" style={{ justifyContent: "space-between", ...(salvou ? { background: "var(--marca-clara)", borderRadius: 10, padding: "8px 12px" } : {}) }}>
+                <span>{msg}</span>
+                {salvou && <Link href="/pacientes" className="botao sec">Próximo paciente →</Link>}
+              </div>
+            )}
             <button className="botao" disabled={salvando}>{salvando ? "Salvando..." : "Salvar evolução"}</button>
           </form>
 
