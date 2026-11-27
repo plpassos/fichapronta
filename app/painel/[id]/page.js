@@ -53,7 +53,7 @@ export default function DetalheFicha({ params }) {
   if (!f) return <><Topo /><main className="conteudo">Ficha não encontrada.</main></>;
 
   if (f.status !== "respondida") {
-    const url = typeof window !== "undefined" ? `${window.location.origin}/f/${f.token}` : "";
+    const url = typeof window !== "undefined" ? `${window.location.origin}/f/${f.token}${f.modo === "formulario_rapido" ? "?r=1" : ""}` : "";
     let tel = (f.paciente_whatsapp || "").replace(/\D/g, "");
     if (tel && !tel.startsWith("55")) tel = "55" + tel;
     const whats = `https://wa.me/${tel}?text=${encodeURIComponent(`Olá, ${f.paciente_nome.split(" ")[0]}! Lembrete: antes da nossa sessão, preciso que você preencha esta ficha. Leva uns 8 minutos: ${url}`)}`;

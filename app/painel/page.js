@@ -32,6 +32,7 @@ export default function Painel() {
   const [novas, setNovas] = useState([]);
   const [modo, setModo] = useState("formulario");
   const [criando, setCriando] = useState(false);
+  const [facil, setFacil] = useState(true); // uma pergunta por tela (padrão) ou várias
 
   async function carregar() {
     const { data: { user } } = await supabase.auth.getUser();
@@ -56,12 +57,12 @@ export default function Painel() {
     const token = gerarToken();
     setCriando(true);
     const { data: nova, error } = await supabase.from("fichas").insert({
-      profissional_id: perfil.id, token, paciente_nome: nome.trim(), paciente_whatsapp: tel.trim(), modo,
+      profissional_id: perfil.id, token, paciente_nome: nome.trim(), paciente_whatsapp: tel.trim(), modo: presencial ? "presencial" : facil ? "formulario" : "formulario_rapido",
     }).select("id").single();
     if (error) { setCriando(false); return setErro(presencial ? "Não foi possível abrir a ficha. Tente de novo." : "Não foi possível gerar o link. Tente de novo."); }
     if (presencial) return (window.location.href = `/f/${token}?p=${nova.id}`);
     setCriando(false);
-    const url = `${window.location.origin}/f/${token}`;
+    const url = `${window.location.origin}/f/${token}${facil ? "" : "?r=1"}`;
     const primeiro = nome.trim().split(" ")[0];
     const texto = `Olá, ${primeiro}! Antes da nossa primeira sessão, preciso de algumas informações. Leva uns 8 minutos: ${url}`;
     setGerado({ url, whats: linkWhatsApp(tel, texto) });
@@ -86,6 +87,13 @@ export default function Painel() {
               <label className="linha" style={{ cursor: "pointer", minHeight: 40 }}><input type="radio" name="modo" checked={modo === "presencial"} onChange={() => setModo("presencial")} /> Eu preencho agora, com o paciente</label>
               <label className="linha suave" style={{ minHeight: 40 }}><input type="radio" name="modo" disabled /> Conversa com a assistente (em breve)</label>
             </fieldset>
+            {modo === "formulario" && (
+              <fieldset style={{ border: 0, margin: 0, padding: 0 }}>
+                <legend className="rotulo">Facilidade para preencher</legend>
+                <label className="linha" style={{ cursor: "pointer", minHeight: 40, flexWrap: "nowrap", alignItems: "flex-start" }}><input type="radio" name="facil" checked={facil} onChange={() => setFacil(true)} style={{ marginTop: 5 }} /><span><b>Uma pergunta por tela</b><br /><span className="suave">Mais fácil: para idosos ou quem tem dificuldade com o celular</span></span></label>
+                <label className="linha" style={{ cursor: "pointer", minHeight: 40, flexWrap: "nowrap", alignItems: "flex-start" }}><input type="radio" name="facil" checked={!facil} onChange={() => setFacil(false)} style={{ marginTop: 5 }} /><span><b>Várias perguntas por tela</b><br /><span className="suave">Mais rápido: para adultos acostumados com o celular</span></span></label>
+              </fieldset>
+            )}
             <button className="botao" disabled={criando}>{modo === "presencial" ? (criando ? "Abrindo..." : "Começar a anamnese") : "Gerar link"}</button>
           </form>
           {erro && <p className="erro" role="alert">{erro}</p>}

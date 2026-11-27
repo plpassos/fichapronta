@@ -183,7 +183,7 @@ function Data3({ valor, set }) {
   );
 }
 
-function Campo({ f, data, set, avancar }) {
+function Campo({ f, data, set, avancar, rotuloId = "pergunta" }) {
   const v = data[f.id];
   const anexar = (k, t) => set(k, (data[k] ? String(data[k]).trim() + " " : "") + t);
 
@@ -227,9 +227,9 @@ function Campo({ f, data, set, avancar }) {
     <div className="pilha" style={{ gap: 8 }}>
       {f.voz && <div><BotaoMicrofone onTexto={(t) => anexar(f.id, t)} rotulo="Responder falando" /></div>}
       {f.type === "textarea" ? (
-        <textarea id={f.id} aria-labelledby="pergunta" value={v || ""} onChange={(e) => set(f.id, e.target.value)} style={{ minHeight: 110 }} />
+        <textarea id={f.id} aria-labelledby={rotuloId} value={v || ""} onChange={(e) => set(f.id, e.target.value)} style={{ minHeight: 110 }} />
       ) : (
-        <input id={f.id} aria-labelledby="pergunta" type={f.type === "tel" ? "tel" : "text"} inputMode={f.type === "tel" ? "tel" : undefined} autoComplete={f.id === "nome" ? "name" : f.type === "tel" ? "tel" : undefined} placeholder={f.ph} value={v || ""} onChange={(e) => set(f.id, e.target.value)} style={{ fontSize: "1.15em" }} />
+        <input id={f.id} aria-labelledby={rotuloId} type={f.type === "tel" ? "tel" : "text"} inputMode={f.type === "tel" ? "tel" : undefined} autoComplete={f.id === "nome" ? "name" : f.type === "tel" ? "tel" : undefined} placeholder={f.ph} value={v || ""} onChange={(e) => set(f.id, e.target.value)} style={{ fontSize: "1.15em" }} />
       )}
     </div>
   );
@@ -264,6 +264,11 @@ export default function FichaPaciente({ params, searchParams }) {
   // ?p=<id da ficha>: o profissional está preenchendo junto com o paciente
   const fichaIdProf = typeof searchParams?.p === "string" && /^[0-9a-f-]{36}$/i.test(searchParams.p) ? searchParams.p : null;
   const modoProf = !!fichaIdProf;
+  // Como as perguntas aparecem: "uma" por tela (mais fácil, padrão), "secao" (um assunto por tela, mais rápido)
+  // ou "tudo" numa página só (versão compacta do profissional)
+  const exibicao = modoProf ? "tudo" : searchParams?.r === "1" ? "secao" : "uma";
+  const agrupado = exibicao !== "uma";
+  const [errosTela, setErrosTela] = useState({});
   const chave = `ficha-${params.token}`;
   const [info, setInfo] = useState(undefined);
   const [data, setData] = useState({});
@@ -290,6 +295,7 @@ export default function FichaPaciente({ params, searchParams }) {
       setData(d0);
       dataRef.current = d0;
       if (typeof salvo.passo === "number") setPasso(salvo.passo);
+      else if (modoProf) setPasso(0);
       setLetraGrande(localStorage.getItem("ficha-letra-grande") === "1");
     } catch {}
     (async () => {
@@ -317,6 +323,19 @@ export default function FichaPaciente({ params, searchParams }) {
     return montarPassos(montarEtapas(prof.tecnicas || [], prof.opcionais || {})).filter((x) => !(x.tipo === "campo" && pular.has(x.campo.id)));
   }, [prof, info]);
   const iFinal = passos.length - 1;
+  // Telas: listas de índices de perguntas. A última tela é sempre a autorização final.
+  const telas = useMemo(() => {
+    if (!agrupado) return passos.map((_, i) => [i]);
+    const grupos = [];
+    passos.slice(0, iFinal).forEach((x, i) => {
+      const ult = grupos[grupos.length - 1];
+      if (ult && (exibicao === "tudo" || passos[ult[0]].secao === x.secao)) ult.push(i);
+      else grupos.push([i]);
+    });
+    return [...grupos, [iFinal]];
+  }, [passos, agrupado, exibicao, iFinal]);
+  const telaFinal = telas.length - 1;
+  const telaDe = (i) => (agrupado ? telas.findIndex((t) => t.includes(i)) : i);
 
   function guardar(novoData, novoPasso) {
     try { localStorage.setItem(chave, JSON.stringify({ data: novoData, passo: novoPasso })); } catch {}
@@ -333,6 +352,7 @@ export default function FichaPaciente({ params, searchParams }) {
   function irPara(n) {
     clearTimeout(timer.current);
     setErro("");
+    setErrosTela({});
     setPasso(n);
     setRevisando(false);
     guardar(dataRef.current, n);
@@ -378,7 +398,11 @@ export default function FichaPaciente({ params, searchParams }) {
     if (!nomeCompleto(data.nome)) { setRevisando(true); return setErro("Confira seu nome completo em “Seus dados”, na revisão."); }
     if (data.tel && !telValido(data.tel)) { setRevisando(true); return setErro("Confira seu WhatsApp em “Seus dados”, na revisão."); }
     const faltando = passos.slice(0, iFinal).findIndex((p) => erroDoPasso(p, data));
-    if (faltando >= 0) { irPara(faltando); return setErro(erroDoPasso(passos[faltando], data)); }
+    if (faltando >= 0) {
+      irPara(telaDe(faltando));
+      if (agrupado) { setErrosTela({ [faltando]: erroDoPasso(passos[faltando], data) }); return setErro("Falta responder uma pergunta. Ela está marcada em vermelho."); }
+      return setErro(erroDoPasso(passos[faltando], data));
+    }
     setEnviando(true);
     const respostas = { ...data };
     if (respostas.nasc === "invalida") delete respostas.nasc;
@@ -453,7 +477,7 @@ export default function FichaPaciente({ params, searchParams }) {
           {barra}
           <section className="cartao pilha">
             <ul style={{ margin: 0, paddingLeft: 20, display: "flex", flexDirection: "column", gap: 10, fontSize: "1.05em" }}>
-              <li>São perguntas curtas, <b>uma de cada vez</b>. Leva cerca de 8 minutos.</li>
+              <li>{agrupado ? <>São perguntas curtas, <b>separadas por assunto</b>. Leva cerca de 6 minutos.</> : <>São perguntas curtas, <b>uma de cada vez</b>. Leva cerca de 8 minutos.</>}</li>
               <li>Na maioria, é só <b>tocar na resposta</b>.</li>
               <li>Toque em <b>Ouvir</b> para escutar a pergunta, e no <b>microfone</b> para responder falando.</li>
               <li>Pode parar e continuar depois. Suas respostas ficam salvas neste celular.</li>
@@ -497,7 +521,7 @@ export default function FichaPaciente({ params, searchParams }) {
                 return (
                   <div key={i} className="linha" style={{ justifyContent: "space-between", flexWrap: "nowrap", padding: "10px 0", borderTop: "1px solid var(--linha)", alignItems: "flex-start" }}>
                     <div style={{ minWidth: 0 }}><div className="suave" style={{ fontSize: 14 }}>{pergunta}</div><div style={{ fontWeight: 600 }}>{resp}</div></div>
-                    <button type="button" className="botao sec" style={{ minHeight: 44, flexShrink: 0 }} onClick={() => { setVoltarRevisao(true); irPara(i); }}>Alterar</button>
+                    <button type="button" className="botao sec" style={{ minHeight: 44, flexShrink: 0 }} onClick={() => { setVoltarRevisao(true); irPara(telaDe(i)); }}>Alterar</button>
                   </div>
                 );
               })}
@@ -505,19 +529,101 @@ export default function FichaPaciente({ params, searchParams }) {
             </section>
           ))}
           <p className="erro" role="alert" style={{ margin: 0, minHeight: "1.5em" }}>{erro}</p>
-          <button type="button" className="botao largo" style={{ minHeight: 58, fontSize: "1.1em" }} onClick={() => { if (!nomeCompleto(data.nome)) return setErro("Confira seu nome completo em “Seus dados”."); if (data.tel && !telValido(data.tel)) return setErro("Confira seu WhatsApp em “Seus dados”: DDD + número."); irPara(iFinal); }}>Está tudo certo, continuar</button>
+          <button type="button" className="botao largo" style={{ minHeight: 58, fontSize: "1.1em" }} onClick={() => { if (!nomeCompleto(data.nome)) return setErro("Confira seu nome completo em “Seus dados”."); if (data.tel && !telValido(data.tel)) return setErro("Confira seu WhatsApp em “Seus dados”: DDD + número."); irPara(telaDe(iFinal)); }}>Está tudo certo, continuar</button>
         </main>
       </div>
     );
   }
 
-  const p = passos[passo];
+  if (agrupado && passo >= 0 && passo < telaFinal) {
+    const indices = telas[passo] || [];
+    const compacto = exibicao === "tudo";
+    function proximaTela() {
+      const erros = {};
+      indices.forEach((i) => { const e = erroDoPasso(passos[i], data); if (e) erros[i] = e; });
+      setErrosTela(erros);
+      const primeiro = indices.find((i) => erros[i]);
+      if (primeiro !== undefined) {
+        setErro("Falta responder algumas perguntas. Elas estão marcadas em vermelho.");
+        document.getElementById("q-" + primeiro)?.scrollIntoView({ behavior: "smooth", block: "center" });
+        return;
+      }
+      if (voltarRevisao) { setVoltarRevisao(false); return abrirRevisao(); }
+      // O profissional vai direto para a autorização; o paciente revisa antes
+      if (passo + 1 >= telaFinal) return compacto ? irPara(telaFinal) : abrirRevisao();
+      irPara(passo + 1);
+    }
+    const nada = () => {};
+    return (
+      <div className={cls}>
+        {faixaProf}
+        <header className="cabeca-paciente" style={{ padding: "16px 16px 14px" }}>
+          <div style={{ maxWidth: 640, margin: "0 auto" }}>
+            <div className="mini">{prof.nome}</div>
+            <div className="linha" style={{ justifyContent: "space-between", marginTop: 8, fontSize: 14, color: "#e6f6f5" }}>
+              <span>{compacto ? "Anamnese completa" : passos[indices[0]]?.secao}</span><span>{compacto ? `${indices.length} perguntas` : `Parte ${passo + 1} de ${telaFinal}`}</span>
+            </div>
+            {!compacto && <div style={{ height: 8, background: "rgba(255,255,255,.25)", borderRadius: 99, marginTop: 6 }}><div style={{ width: `${Math.round(((passo + 1) / telas.length) * 100)}%`, height: 8, background: "#fff", borderRadius: 99 }} /></div>}
+          </div>
+        </header>
+        <main className="ficha-corpo pilha">
+          {!compacto && barra}
+          <h1 ref={topo} tabIndex={-1} style={{ margin: 0, fontSize: compacto ? 22 : 24, outline: "none" }}>{compacto ? "Responda junto com o paciente" : passos[indices[0]]?.secao}</h1>
+          {indices.map((i, k) => {
+            const q = passos[i];
+            const novaSecao = compacto && (k === 0 || passos[indices[k - 1]].secao !== q.secao);
+            const texto = q.tipo === "yn" ? q.item.q : q.campo.label;
+            const dicaQ = q.tipo === "yn" ? DICAS[q.item.id] : q.campo.hint;
+            const rid = "pq-" + i;
+            return (
+              <div key={i} className="pilha" style={{ gap: 10 }}>
+                {novaSecao && <h2 style={{ margin: k ? "14px 0 0" : 0, fontSize: 19, color: "var(--marca)" }}>{q.secao}</h2>}
+                {q.sub && <div style={{ background: "var(--marca-clara)", borderRadius: 10, padding: "10px 12px" }}><b>{q.sub.title}</b>{!compacto && <div style={{ fontSize: 14 }}>{q.sub.intro}</div>}</div>}
+                <section id={"q-" + i} className="cartao pilha" style={{ padding: compacto ? "14px 14px" : "18px 16px", gap: 10, ...(errosTela[i] ? { borderColor: "#b3261e", boxShadow: "0 0 0 1px #b3261e" } : {}) }}>
+                  <div id={rid} style={{ fontWeight: 600, fontSize: compacto ? "1em" : "1.15em", lineHeight: 1.3 }}>
+                    {texto}{(q.tipo === "yn" || q.campo.req) && <span style={{ color: "var(--marca)" }}> *</span>}
+                  </div>
+                  {dicaQ && !compacto && <p className="suave" style={{ margin: 0 }}>{dicaQ}</p>}
+                  {!compacto && <div><BotaoOuvir texto={[texto, dicaQ].filter(Boolean).join(". ")} /></div>}
+                  {q.tipo === "yn" && (
+                    <div className="pilha" style={{ gap: 10 }}>
+                      <Chips nome={q.item.id} opts={["Sim", "Não", "Não sei"]} valor={data[q.item.id]} onToggle={(o) => { set(q.item.id, o); setErrosTela((x) => ({ ...x, [i]: "" })); }} />
+                      {q.item.detalhe && data[q.item.id] === "Sim" && (
+                        <div>
+                          <label className="rotulo" htmlFor={q.item.id + "_outro"}>{q.item.detalhe}</label>
+                          <textarea id={q.item.id + "_outro"} value={data[q.item.id + "_outro"] || ""} onChange={(e) => set(q.item.id + "_outro", e.target.value)} style={{ minHeight: 70 }} />
+                        </div>
+                      )}
+                      {q.item.adapta && data[q.item.id] === "Sim" && <div className="nota">{compacto ? "Adaptar" : "O profissional vai adaptar"}: {q.item.adapta}.</div>}
+                    </div>
+                  )}
+                  {q.tipo === "campo" && <Campo f={q.campo} data={data} set={(k2, v2) => { set(k2, v2); setErrosTela((x) => ({ ...x, [i]: "" })); }} avancar={nada} rotuloId={rid} />}
+                  {errosTela[i] && <p className="erro" style={{ margin: 0 }}>{errosTela[i]}</p>}
+                </section>
+              </div>
+            );
+          })}
+          <p className="erro" role="alert" style={{ margin: 0, minHeight: "1.5em" }}>{erro}</p>
+          <div className="linha" style={{ flexWrap: "nowrap" }}>
+            {!(compacto && passo === 0) && <button type="button" className="botao sec" style={{ flex: 1, minHeight: 56 }} onClick={() => irPara(passo - 1)}>Voltar</button>}
+            <button type="button" className="botao" style={{ flex: 2, minHeight: 56, fontSize: "1.1em" }} onClick={proximaTela}>
+              {voltarRevisao ? "Voltar para a revisão" : passo + 1 >= telaFinal ? (compacto ? "Ir para a autorização do paciente" : "Revisar respostas") : "Próxima parte"}
+            </button>
+          </div>
+          {!compacto && passo > 0 && <button type="button" className="botao-icone" style={{ alignSelf: "center", border: 0 }} onClick={abrirRevisao}>Ver minhas respostas</button>}
+        </main>
+      </div>
+    );
+  }
+
+  const p = agrupado ? passos[iFinal] : passos[passo];
+  if (!p) { setTimeout(() => irPara(-1), 0); return null; }
   const pergunta = p.tipo === "yn" ? p.item.q : p.tipo === "final" ? "Para terminar, sua autorização" : p.campo.label;
   const dica = p.tipo === "yn" ? DICAS[p.item.id] : p.tipo === "campo" ? p.campo.hint : p.etapa.intro;
   const ehFinal = p.tipo === "final";
   const autoAvanca = p.tipo === "yn" || (p.tipo === "campo" && (p.campo.type === "scale" || (p.campo.type === "radio" && !(p.campo.other && data[p.campo.id] === p.campo.other))));
   const obrigatorio = p.tipo === "yn" || p.tipo === "final" || (p.tipo === "campo" && !!p.campo.req);
-  const pct = Math.round(((passo + 1) / passos.length) * 100);
+  const pct = agrupado ? 100 : Math.round(((passo + 1) / passos.length) * 100);
 
   return (
     <div className={cls}>
