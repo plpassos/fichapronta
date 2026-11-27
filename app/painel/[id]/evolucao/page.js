@@ -18,9 +18,9 @@ const SINAIS = [
   { id: "pa", nome: "Pressão (mmHg)", ph: "120/80" },
   { id: "fc", nome: "Freq. cardíaca (bpm)", ph: "72" },
   { id: "spo2", nome: "Saturação SpO₂ (%)", ph: "98" },
-  { id: "fr", nome: "Freq. respiratória (irpm)", ph: "16" },
-  { id: "temp", nome: "Temperatura (°C)", ph: "36,5" },
-  { id: "gli", nome: "Glicemia (mg/dL)", ph: "" },
+  { id: "fr", nome: "Freq. respiratória (irpm)", ph: "16", extra: true },
+  { id: "temp", nome: "Temperatura (°C)", ph: "36,5", extra: true },
+  { id: "gli", nome: "Glicemia (mg/dL)", ph: "", extra: true },
 ];
 
 const FAIXAS = { fc: [20, 250, "Freq. cardíaca"], spo2: [50, 100, "Saturação"], fr: [4, 60, "Freq. respiratória"], temp: [30, 43, "Temperatura"], gli: [20, 600, "Glicemia"] };
@@ -90,6 +90,7 @@ export default function Evolucao({ params }) {
   const [editando, setEditando] = useState(null); // sessão sendo corrigida
   const [avaliacao, setAvaliacao] = useState(null); // última avaliação com conclusão (diagnóstico e plano)
   const [base, setBase] = useState(VAZIO); // como a sessão nova começa: vazia ou com o plano
+  const [outrosSinais, setOutrosSinais] = useState(false);
   const recuperou = useRef(false);
   const formRef = useRef(VAZIO);
   const [urls, setUrls] = useState({});
@@ -416,13 +417,14 @@ export default function Evolucao({ params }) {
                 <div>
                   <div className="rotulo">Sinais vitais</div>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10 }}>
-                    {SINAIS.map((s) => (
+                    {SINAIS.filter((s) => !s.extra || outrosSinais || String(form.sinais[s.id] || "").trim()).map((s) => (
                       <div key={s.id}>
                         <label className="suave" htmlFor={"s_" + s.id} style={{ fontSize: 13 }}>{s.nome}</label>
                         <input id={"s_" + s.id} type="text" inputMode="decimal" placeholder={ultima?.sinais?.[s.id] || s.ph} value={form.sinais[s.id] || ""} onChange={(e) => setForm({ ...form, sinais: { ...form.sinais, [s.id]: e.target.value } })} />
                       </div>
                     ))}
                   </div>
+                  {!outrosSinais && <button type="button" onClick={() => setOutrosSinais(true)} style={{ border: 0, background: "none", color: "var(--marca)", font: "inherit", fontSize: 14, cursor: "pointer", padding: "6px 0", minHeight: 36 }}>+ freq. respiratória, temperatura, glicemia</button>}
                 </div>
                 <div>
                   <label className="rotulo" htmlFor="fotos">Fotos</label>

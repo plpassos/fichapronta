@@ -124,3 +124,18 @@ input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-
   .escala-dor button { min-height: 48px; font-size: 17px; }
 }
 .resumo-clinico { display: flex; flex-direction: column; gap: 4px; padding: 14px 16px; font-size: 15px; background: var(--marca-clara); border-color: #c5e3e0; }
+
+/* Menu: no topo no computador; fixo embaixo no celular, ao alcance do polegar */
+.nav-icone, .rot-curto, .sair-topo { display: none; }
+.nav a { display: inline-flex; align-items: center; gap: 6px; }
+@media (max-width: 640px) {
+  .topo { padding: 10px 16px; flex-wrap: nowrap; }
+  .sair-topo { display: inline-flex; align-items: center; min-height: 40px; padding: 0 12px; border: 1px solid var(--borda); border-radius: 8px; background: #fff; color: var(--suave); font: inherit; font-size: 14px; cursor: pointer; }
+  .nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 50; display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; background: #fff; border-top: 1px solid var(--linha); padding: 4px 4px calc(4px + env(safe-area-inset-bottom)); box-shadow: 0 -2px 10px rgba(16, 41, 43, .06); }
+  .nav a { flex-direction: column; justify-content: center; gap: 2px; min-height: 56px; padding: 4px 2px; font-size: 12px; border-radius: 10px; }
+  .nav-icone, .rot-curto { display: block; }
+  .rot-longo, .sair-nav { display: none !important; }
+  body { padding-bottom: 76px; }
+  .abas a { padding: 0 10px; }
+}
+@media print { body { padding-bottom: 0; } }

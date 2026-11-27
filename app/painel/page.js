@@ -112,7 +112,6 @@ export default function Painel({ searchParams }) {
               <legend className="rotulo">Quem vai preencher a anamnese?</legend>
               <label className="linha" style={{ cursor: "pointer", minHeight: 40 }}><input type="radio" name="modo" checked={modo === "formulario"} onChange={() => setModo("formulario")} /> O paciente, pelo link no WhatsApp</label>
               <label className="linha" style={{ cursor: "pointer", minHeight: 40 }}><input type="radio" name="modo" checked={modo === "presencial"} onChange={() => setModo("presencial")} /> Eu preencho agora, com o paciente</label>
-              <label className="linha suave" style={{ minHeight: 40 }}><input type="radio" name="modo" disabled /> Conversa com a assistente (em breve)</label>
             </fieldset>
             {modo === "formulario" && (
               <fieldset style={{ border: 0, margin: 0, padding: 0 }}>
@@ -146,23 +145,10 @@ export default function Painel({ searchParams }) {
 
         <section className="pilha" style={{ gridColumn: "span 2", minWidth: 0 }}>
         {novas.length > 0 && (
-          <div className="cartao" style={{ borderColor: "#7FD6A4", background: "#F0FAF4" }} role="status">
-            <h2 style={{ margin: "0 0 4px" }}>{novas.length === 1 ? "1 ficha nova respondida" : `${novas.length} fichas novas respondidas`}</h2>
-            <p className="suave" style={{ margin: "0 0 8px" }}>Toque para ver. Depois de aberta, ela fica só na aba Pacientes.</p>
-            {novas.map((f) => {
-              const { alertas, cuidados } = calcularAlertas(f.respostas || {}, f.tecnicas || []);
-              return (
-                <Link key={f.id} href={`/painel/${f.id}`} className="item-ficha">
-                  <div className="linha" style={{ justifyContent: "space-between" }}><b>{f.paciente_nome}</b><span className="suave">respondida {quando(f.respondida_em)}</span></div>
-                  <div className="linha" style={{ marginTop: 6, gap: 6 }}>
-                    <span className="etiqueta etq-ok">Nova</span>
-                    {alertas.length > 0 && <span className="etiqueta etq-alerta">{alertas.length} alerta{alertas.length > 1 ? "s" : ""}</span>}
-                    {cuidados.length > 0 && <span className="etiqueta etq-cuidado">{cuidados.length} cuidado{cuidados.length > 1 ? "s" : ""}</span>}
-                  </div>
-                </Link>
-              );
-            })}
-          </div>
+          <Link href="/pacientes" className="cartao" role="status" style={{ display: "block", textDecoration: "none", color: "inherit", borderColor: "#7FD6A4", background: "#F0FAF4" }}>
+            <b>{novas.length === 1 ? "1 ficha nova respondida" : `${novas.length} fichas novas respondidas`}</b>
+            <span className="suave"> · aparecem no topo da lista de Pacientes →</span>
+          </Link>
         )}
         <div className="cartao">
           <h2>Aguardando resposta do formulário</h2>

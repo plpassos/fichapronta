@@ -42,7 +42,8 @@ export default function Cadastro() {
     if (wa && wa.length !== 10 && wa.length !== 11) return setErro("Confira o WhatsApp: use DDD + número, por exemplo (11) 98765-4321.");
     setSalvando(true);
     const { data: { user } } = await supabase.auth.getUser();
-    const dados = { id: user.id, ...form, slug: limparSlug(form.slug || form.nome) || null };
+    // o nome curto não aparece mais na tela: mantém o que já existe ou gera pelo nome
+    const dados = { id: user.id, ...form, slug: form.slug || limparSlug(form.nome) || null };
     const { error } = await supabase.from("profiles").upsert(dados);
     setSalvando(false);
     if (error) {
@@ -64,13 +65,8 @@ export default function Cadastro() {
               <option>Fisioterapeuta</option><option>Massoterapeuta</option><option>Quiropraxista</option><option>Outra</option>
             </select>
           </div>
-          <div><label className="rotulo" htmlFor="reg">Registro profissional (opcional)</label><input id="reg" type="text" placeholder="Ex.: CREFITO-3 000000-F" {...campo("registro")} /></div>
+          <div><label className="rotulo" htmlFor="reg">Registro profissional (CREFITO)</label><p className="dica">Aparece no cabeçalho e na assinatura dos PDFs.</p><input id="reg" type="text" placeholder="Ex.: CREFITO-3 000000-F" {...campo("registro")} /></div>
           <div><label className="rotulo" htmlFor="wa">Seu WhatsApp</label><input id="wa" type="tel" placeholder="(11) 90000-0000" {...campo("whatsapp")} /></div>
-          <div>
-            <label className="rotulo" htmlFor="slug">Nome curto para seus links</label>
-            <p className="dica">Só letras, números e hífen. Ex.: lucas-passos</p>
-            <input id="slug" type="text" {...campo("slug")} />
-          </div>
           {erro && <p className="erro" role="alert">{erro}</p>}
           <button className="botao largo" disabled={salvando}>{salvando ? "Salvando..." : novo ? "Continuar: escolher técnicas" : "Salvar"}</button>
         </form>
