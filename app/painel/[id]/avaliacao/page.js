@@ -4,10 +4,24 @@ import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import Topo from "@/components/Topo";
 import AbasPaciente from "@/components/AbasPaciente";
+import Impressao from "@/components/Impressao";
+import { lerRascunho, gravarRascunho, useAvisoSaida } from "@/lib/rascunho";
+import { agoraLocal } from "@/lib/datas";
 import { BotaoMicrofone } from "@/components/Voz";
 import { ADM, FORCA, FUNCIONAIS, REGIOES_CORPO, sugerirRegioes, nomeTeste } from "@/lib/testes";
 
-const VAZIO = { testes: {}, adm: {}, forca: {}, func: {}, pg: [], pgObs: "", postura: "", obs: "" };
+const CONCLUSAO_VAZIA = { diagnostico: "", prognostico: "", objCurto: "", objLongo: "", frequencia: "", sessoes: "", condutas: "" };
+const VAZIO = { testes: {}, adm: {}, forca: {}, func: {}, pg: [], pgObs: "", postura: "", obs: "", conclusao: CONCLUSAO_VAZIA };
+const CAMPOS_CONCLUSAO = [
+  { id: "diagnostico", nome: "Diagnóstico cinético-funcional", area: true, ph: "Ex.: disfunção do movimento de flexão do ombro D por dor e fraqueza do manguito rotador" },
+  { id: "prognostico", nome: "Prognóstico", ph: "Ex.: bom, com retorno às atividades em 8 semanas" },
+  { id: "objCurto", nome: "Objetivos de curto prazo", area: true, ph: "Ex.: reduzir a dor para 3/10 em 2 semanas" },
+  { id: "objLongo", nome: "Objetivos de longo prazo", area: true, ph: "Ex.: voltar a treinar sem dor em 3 meses" },
+  { id: "frequencia", nome: "Frequência", ph: "Ex.: 2x por semana" },
+  { id: "sessoes", nome: "Número de sessões previstas", ph: "Ex.: 10" },
+  { id: "condutas", nome: "Condutas planejadas", area: true, ph: "Ex.: liberação miofascial, exercícios de estabilização, orientações posturais" },
+];
+const chaveRascunho = (id) => `fp-rascunho-avaliacao-${id}`;
 
 function dataBR(d) {
   return new Date(d).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
@@ -51,6 +65,9 @@ function limpar(form) {
   if (form.pgObs.trim()) dados.pgObs = form.pgObs.trim();
   if (form.postura.trim()) dados.postura = form.postura.trim();
   if (form.obs.trim()) dados.obs = form.obs.trim();
+  const conc = {};
+  for (const [k, v] of Object.entries(form.conclusao || {})) if (String(v || "").trim()) conc[k] = String(v).trim();
+  if (Object.keys(conc).length) dados.conclusao = conc;
   return dados;
 }
 
@@ -136,6 +153,18 @@ export default function Avaliacao({ params }) {
   const [arquivos, setArquivos] = useState([]);
   const [salvando, setSalvando] = useState(false);
   const [msg, setMsg] = useState("");
+  const [quando, setQuando] = useState(() => agoraLocal());
+  const [rascunhoPronto, setRascunhoPronto] = useState(false);
+  const [recuperado, setRecuperado] = useState(false);
+
+  // Rascunho automático: uma avaliação longa não se perde ao trocar de aba ou recarregar
+  useEffect(() => {
+    const r = lerRascunho(chaveRascunho(params.id), VAZIO);
+    if (r) { setForm({ ...r, conclusao: { ...CONCLUSAO_VAZIA, ...(r.conclusao || {}) } }); setRecuperado(true); }
+    setRascunhoPronto(true);
+  }, [params.id]);
+  useEffect(() => { if (rascunhoPronto) gravarRascunho(chaveRascunho(params.id), form, VAZIO); }, [form, rascunhoPronto, params.id]);
+  useAvisoSaida(JSON.stringify(form) !== JSON.stringify(VAZIO) || arquivos.length > 0);
 
   async function carregar() {
     const { data: { user } } = await supabase.auth.getUser();
@@ -191,6 +220,9 @@ export default function Avaliacao({ params }) {
     const dados = limpar(form);
     if (!Object.keys(dados).length && !arquivos.length) return setMsg("Preencha pelo menos um item antes de salvar.");
     if (arquivos.length && ficha?.respostas?.fotos_ok !== true) return setMsg("O paciente não autorizou fotos na ficha.");
+    const dataAval = new Date(quando);
+    if (!quando || isNaN(dataAval)) return setMsg("Confira a data e a hora da avaliação.");
+    if (dataAval.getTime() > Date.now() + 5 * 60000) return setMsg("A data da avaliação não pode ser no futuro.");
     setSalvando(true);
     const fotos = [];
     for (const arq of arquivos) {
@@ -200,10 +232,11 @@ export default function Avaliacao({ params }) {
       if (error) { setSalvando(false); return setMsg("Não foi possível enviar uma das fotos. Tente de novo."); }
       fotos.push(caminho);
     }
-    const { error } = await supabase.from("avaliacoes").insert({ ficha_id: ficha.id, profissional_id: userId, dados, fotos });
+    const { error } = await supabase.from("avaliacoes").insert({ ficha_id: ficha.id, profissional_id: userId, data: dataAval.toISOString(), dados, fotos });
     setSalvando(false);
     if (error) return setMsg("Não foi possível salvar a avaliação. Confira se o arquivo supabase/avaliacao.sql foi rodado no Supabase.");
-    setForm(VAZIO); setArquivos([]);
+    setForm(VAZIO); setArquivos([]); setQuando(agoraLocal()); setRecuperado(false);
+    gravarRascunho(chaveRascunho(ficha.id), VAZIO, VAZIO);
     setMsg("Avaliação salva!");
     carregar();
   }
@@ -222,6 +255,7 @@ export default function Avaliacao({ params }) {
       <div className="nao-imprimir"><Topo /></div>
       <main className="conteudo pilha">
         <AbasPaciente id={ficha.id} atual="avaliacao" />
+        <Impressao ficha={ficha} titulo="Avaliação física">
         {ficha.ativo === false && <div className="cartao nao-imprimir" style={{ background: "#eceff0" }}>Paciente inativo. Você ainda pode registrar avaliações.</div>}
 
         <div className="linha" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
@@ -245,8 +279,13 @@ export default function Avaliacao({ params }) {
 
         <form onSubmit={salvar} className="pilha nao-imprimir">
           <div className="linha" style={{ justifyContent: "space-between" }}>
-            <h2 style={{ margin: 0, fontSize: 20 }}>{reavaliacao ? "Reavaliação" : "Nova avaliação"} · {dataBR(new Date())}</h2>
+            <h2 style={{ margin: 0, fontSize: 20 }}>{reavaliacao ? "Reavaliação" : "Nova avaliação"}</h2>
             {reavaliacao && <span className="suave" style={{ fontSize: 13 }}>"antes" = {dataCurta(ultima.data)}</span>}
+          </div>
+          {recuperado && <p role="status" className="suave" style={{ margin: 0 }}>Recuperamos a avaliação que você estava preenchendo.</p>}
+          <div>
+            <label className="rotulo" htmlFor="quando">Data e hora da avaliação</label>
+            <input id="quando" type="datetime-local" value={quando} max={agoraLocal()} onChange={(e) => setQuando(e.target.value)} style={{ maxWidth: 260 }} />
           </div>
 
           <Secao titulo="Testes especiais" aberta n={Object.values(form.testes).filter((v) => v.D || v.E).length}>
@@ -408,6 +447,24 @@ export default function Avaliacao({ params }) {
             <textarea id="obs" value={form.obs} onChange={(e) => setForm({ ...form, obs: e.target.value })} />
           </Secao>
 
+          <Secao titulo="Conclusão: diagnóstico e plano de tratamento" aberta n={Object.values(form.conclusao || {}).filter((v) => String(v || "").trim()).length}>
+            {anterior.conclusao?.diagnostico && <p className="suave" style={{ margin: 0 }}>Diagnóstico anterior: {anterior.conclusao.diagnostico}</p>}
+            {CAMPOS_CONCLUSAO.map((c) => {
+              const set = (v) => setForm((f) => ({ ...f, conclusao: { ...f.conclusao, [c.id]: v } }));
+              return (
+                <div key={c.id}>
+                  <div className="linha" style={{ justifyContent: "space-between" }}>
+                    <label className="rotulo" htmlFor={"c_" + c.id} style={{ margin: 0 }}>{c.nome}</label>
+                    {c.area && <BotaoMicrofone onTexto={(t) => set(form.conclusao?.[c.id] ? `${form.conclusao[c.id].trim()} ${t}` : t)} />}
+                  </div>
+                  {c.area
+                    ? <textarea id={"c_" + c.id} value={form.conclusao?.[c.id] || ""} placeholder={c.ph} onChange={(e) => set(e.target.value)} style={{ marginTop: 6, minHeight: 70 }} />
+                    : <input id={"c_" + c.id} type="text" value={form.conclusao?.[c.id] || ""} placeholder={c.ph} onChange={(e) => set(e.target.value)} style={{ marginTop: 6 }} />}
+                </div>
+              );
+            })}
+          </Secao>
+
           {msg && <p role="status" style={{ margin: 0 }}>{msg}</p>}
           <button className="botao" disabled={salvando}>{salvando ? "Salvando..." : reavaliacao ? "Salvar reavaliação" : "Salvar avaliação"}</button>
         </form>
@@ -431,6 +488,11 @@ export default function Avaliacao({ params }) {
                 {d.pgObs && <p style={{ margin: "6px 0 0" }}><b>Palpação:</b> {d.pgObs}</p>}
                 {d.postura && <p style={{ margin: "6px 0 0" }}><b>Postura:</b> {d.postura}</p>}
                 {d.obs && <p style={{ margin: "6px 0 0" }}>{d.obs}</p>}
+                {d.conclusao && (
+                  <div style={{ marginTop: 8, padding: "8px 12px", background: "var(--marca-clara)", borderRadius: 10 }}>
+                    {CAMPOS_CONCLUSAO.filter((c) => d.conclusao[c.id]).map((c) => <div key={c.id} style={{ margin: "2px 0" }}><b>{c.nome}:</b> {d.conclusao[c.id]}</div>)}
+                  </div>
+                )}
                 {a.fotos?.length > 0 && (
                   <div className="linha" style={{ marginTop: 8 }}>
                     {a.fotos.map((p) => urls[p] ? <a key={p} href={urls[p]} target="_blank" rel="noreferrer"><img src={urls[p]} alt={`Foto da avaliação de ${dataBR(a.data)}`} style={{ width: 80, height: 80, objectFit: "cover", borderRadius: 8 }} /></a> : null)}
@@ -442,6 +504,7 @@ export default function Avaliacao({ params }) {
           })}
         </section>
         <p className="suave nao-imprimir" style={{ margin: 0, fontSize: 13, textAlign: "center" }}>Os testes são sugestões e não substituem o raciocínio clínico.</p>
+        </Impressao>
       </main>
     </>
   );

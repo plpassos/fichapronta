@@ -35,7 +35,7 @@ h1, h2, h3 { line-height: 1.2; }
 
 label.rotulo { font-size: 15px; font-weight: 500; display: block; margin-bottom: 6px; }
 .dica { font-size: 13px; color: var(--suave); margin: -2px 0 6px; }
-input[type=text], input[type=email], input[type=tel], input[type=date], select, textarea {
+input[type=text], input[type=email], input[type=tel], input[type=date], input[type=datetime-local], select, textarea {
   width: 100%; min-height: 46px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--borda);
   background: var(--fundo); font: inherit; font-size: 16px; color: var(--texto);
 }
@@ -89,8 +89,12 @@ input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-
 .cabeca-paciente p { margin: 0; color: #e6f6f5; font-size: 14px; }
 .ficha-corpo { max-width: 640px; margin: 0 auto; padding: 18px 16px 48px; }
 
+.so-imprimir { display: none; }
 @media print {
   .nao-imprimir, .topo { display: none !important; }
+  .so-imprimir { display: block; }
+  .cabecalho-impressao { margin-bottom: 14px; }
+  .rodape-impressao { break-inside: avoid; margin-top: 18px; }
   body { background: #fff; }
   .cartao { border: 0; padding: 0 0 12px; }
   .grade { display: block; }

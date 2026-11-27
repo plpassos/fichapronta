@@ -3,12 +3,15 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { limparRascunhos } from "@/lib/rascunho";
 
 export default function Topo() {
   const path = usePathname();
   const router = useRouter();
 
   async function sair() {
+    // Num computador compartilhado, nada do paciente pode ficar para o próximo usuário
+    limparRascunhos();
     await createClient().auth.signOut();
     router.replace("/login");
   }
