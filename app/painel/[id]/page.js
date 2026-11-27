@@ -27,6 +27,11 @@ export default function DetalheFicha({ params }) {
     if (!error) setF({ ...f, ativo, inativado_em });
   }
 
+  async function preencherAgora() {
+    await supabase.from("fichas").update({ modo: "presencial" }).eq("id", f.id);
+    window.location.href = `/f/${f.token}?p=${f.id}`;
+  }
+
   const botaoAtivo = (x) => (
     <button type="button" className="botao sec nao-imprimir" onClick={alternarAtivo}>{x.ativo === false ? "Reativar paciente" : "Inativar paciente"}</button>
   );
@@ -66,6 +71,10 @@ export default function DetalheFicha({ params }) {
               {tel && <a className="botao" href={whats} target="_blank" rel="noreferrer">Reenviar pelo WhatsApp</a>}
               <button type="button" className="botao sec" onClick={() => { navigator.clipboard.writeText(url); setCopiado(true); }}>{copiado ? "Link copiado!" : "Copiar link"}</button>
             </div>
+          </div>
+          <div className="cartao pilha">
+            <div><b>O paciente está aí com você?</b><div className="suave">Faça a anamnese agora, junto com ele. O que ele já tiver respondido neste aparelho é aproveitado.</div></div>
+            <div className="linha"><button type="button" className="botao" onClick={preencherAgora}>Preencher a anamnese agora</button></div>
             <div className="suave" style={{ wordBreak: "break-all" }}>{url}</div>
           </div>
           <div className="linha">{botaoAtivo(f)}</div>
@@ -147,7 +156,7 @@ export default function DetalheFicha({ params }) {
             </section>
           );
         })()}
-        <p className="suave">Respondida em {new Date(f.respondida_em).toLocaleString("pt-BR")}.</p>
+        <p className="suave">{f.modo === "presencial" ? "Preenchida no atendimento, junto com o paciente, em" : "Respondida pelo paciente em"} {new Date(f.respondida_em).toLocaleString("pt-BR")}.</p>
       </main>
     </>
   );

@@ -30,6 +30,8 @@ export default function Painel() {
   const [gerado, setGerado] = useState(null);
   const [erro, setErro] = useState("");
   const [novas, setNovas] = useState([]);
+  const [modo, setModo] = useState("formulario");
+  const [criando, setCriando] = useState(false);
 
   async function carregar() {
     const { data: { user } } = await supabase.auth.getUser();
@@ -46,14 +48,19 @@ export default function Painel() {
   async function criar(e) {
     e.preventDefault();
     setErro("");
+    const presencial = modo === "presencial";
     const dig = tel.replace(/\D/g, "").replace(/^55(?=\d{10,11}$)/, "");
-    if (dig.length < 10 || dig.length > 11) return setErro("Confira o WhatsApp: use DDD + número, por exemplo (11) 98765-4321.");
+    // No atendimento o WhatsApp é opcional; para enviar o link, é obrigatório
+    if ((!presencial || dig) && (dig.length < 10 || dig.length > 11)) return setErro("Confira o WhatsApp: use DDD + número, por exemplo (11) 98765-4321.");
     if (nome.trim().length < 2) return setErro("Escreva o nome do paciente.");
     const token = gerarToken();
-    const { error } = await supabase.from("fichas").insert({
-      profissional_id: perfil.id, token, paciente_nome: nome.trim(), paciente_whatsapp: tel.trim(), modo: "formulario",
-    });
-    if (error) return setErro("Não foi possível gerar o link. Tente de novo.");
+    setCriando(true);
+    const { data: nova, error } = await supabase.from("fichas").insert({
+      profissional_id: perfil.id, token, paciente_nome: nome.trim(), paciente_whatsapp: tel.trim(), modo,
+    }).select("id").single();
+    if (error) { setCriando(false); return setErro(presencial ? "Não foi possível abrir a ficha. Tente de novo." : "Não foi possível gerar o link. Tente de novo."); }
+    if (presencial) return (window.location.href = `/f/${token}?p=${nova.id}`);
+    setCriando(false);
     const url = `${window.location.origin}/f/${token}`;
     const primeiro = nome.trim().split(" ")[0];
     const texto = `Olá, ${primeiro}! Antes da nossa primeira sessão, preciso de algumas informações. Leva uns 8 minutos: ${url}`;
@@ -69,16 +76,17 @@ export default function Painel() {
       <Topo />
       <main className="conteudo grade">
         <section className="cartao pilha">
-          <h2 style={{ margin: 0 }}>Enviar ficha para um paciente</h2>
+          <h2 style={{ margin: 0 }}>Novo paciente</h2>
           <form onSubmit={criar} className="pilha">
             <div><label className="rotulo" htmlFor="pn">Nome do paciente</label><input id="pn" type="text" required value={nome} onChange={(e) => setNome(e.target.value)} /></div>
-            <div><label className="rotulo" htmlFor="pt">WhatsApp do paciente</label><input id="pt" type="tel" placeholder="(11) 90000-0000" value={tel} onChange={(e) => setTel(e.target.value)} /></div>
+            <div><label className="rotulo" htmlFor="pt">WhatsApp do paciente{modo === "presencial" ? " (opcional)" : ""}</label><input id="pt" type="tel" placeholder="(11) 90000-0000" value={tel} onChange={(e) => setTel(e.target.value)} /></div>
             <fieldset style={{ border: 0, margin: 0, padding: 0 }}>
-              <legend className="rotulo">Como o paciente vai responder?</legend>
-              <label className="linha" style={{ cursor: "pointer" }}><input type="radio" name="modo" defaultChecked /> Formulário</label>
-              <label className="linha suave"><input type="radio" name="modo" disabled /> Conversa com a assistente (em breve)</label>
+              <legend className="rotulo">Quem vai preencher a anamnese?</legend>
+              <label className="linha" style={{ cursor: "pointer", minHeight: 40 }}><input type="radio" name="modo" checked={modo === "formulario"} onChange={() => setModo("formulario")} /> O paciente, pelo link no WhatsApp</label>
+              <label className="linha" style={{ cursor: "pointer", minHeight: 40 }}><input type="radio" name="modo" checked={modo === "presencial"} onChange={() => setModo("presencial")} /> Eu preencho agora, com o paciente</label>
+              <label className="linha suave" style={{ minHeight: 40 }}><input type="radio" name="modo" disabled /> Conversa com a assistente (em breve)</label>
             </fieldset>
-            <button className="botao">Gerar link</button>
+            <button className="botao" disabled={criando}>{modo === "presencial" ? (criando ? "Abrindo..." : "Começar a anamnese") : "Gerar link"}</button>
           </form>
           {erro && <p className="erro" role="alert">{erro}</p>}
           {gerado && (

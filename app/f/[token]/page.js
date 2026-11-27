@@ -259,8 +259,11 @@ function Final({ etapa, data, set }) {
   );
 }
 
-export default function FichaPaciente({ params }) {
+export default function FichaPaciente({ params, searchParams }) {
   const supabase = createClient();
+  // ?p=<id da ficha>: o profissional está preenchendo junto com o paciente
+  const fichaIdProf = typeof searchParams?.p === "string" && /^[0-9a-f-]{36}$/i.test(searchParams.p) ? searchParams.p : null;
+  const modoProf = !!fichaIdProf;
   const chave = `ficha-${params.token}`;
   const [info, setInfo] = useState(undefined);
   const [data, setData] = useState({});
@@ -390,6 +393,21 @@ export default function FichaPaciente({ params }) {
 
   if (info === undefined) return <main className="ficha-corpo suave">Carregando...</main>;
   if (!info) return <main className="ficha-corpo">Este link não é válido. Peça um novo link ao seu profissional.</main>;
+  if ((enviada || info.status === "respondida") && modoProf) {
+    return (
+      <main className="ficha-corpo">
+        <div className="cartao pilha" style={{ textAlign: "center", padding: 28 }}>
+          <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="#2e9e5b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ margin: "0 auto" }} aria-hidden="true"><circle cx="12" cy="12" r="10" /><path d="M7 12.5l3 3 7-7" /></svg>
+          <h1 style={{ margin: 0, fontSize: 26 }}>Anamnese salva</h1>
+          <p style={{ margin: 0 }}>A ficha de {data.nome || info.paciente_nome} já está no seu painel.</p>
+          <div className="linha" style={{ justifyContent: "center" }}>
+            <a className="botao" href={`/painel/${fichaIdProf}`}>Ver a ficha e os alertas</a>
+            <a className="botao sec" href={`/painel/${fichaIdProf}/evolucao`}>Registrar a sessão</a>
+          </div>
+        </div>
+      </main>
+    );
+  }
   if (enviada || info.status === "respondida") {
     return (
       <main className={"ficha-corpo " + cls}>
@@ -401,6 +419,15 @@ export default function FichaPaciente({ params }) {
       </main>
     );
   }
+
+  const faixaProf = modoProf ? (
+    <div role="note" style={{ background: "#10292b", color: "#fff", padding: "8px 16px", fontSize: 14 }}>
+      <div className="linha" style={{ maxWidth: 640, margin: "0 auto", justifyContent: "space-between" }}>
+        <span>Você está preenchendo a ficha de <b>{info.paciente_nome}</b>. Tudo fica salvo neste aparelho.</span>
+        <a href={`/painel/${fichaIdProf}`} style={{ color: "#bfe7e3" }}>Sair</a>
+      </div>
+    </div>
+  ) : null;
 
   const barra = (
     <div className="linha" style={{ justifyContent: "flex-end", gap: 8 }}>
@@ -415,6 +442,7 @@ export default function FichaPaciente({ params }) {
   if (passo < 0) {
     return (
       <div className={cls}>
+        {faixaProf}
         <header className="cabeca-paciente">
           <div style={{ maxWidth: 640, margin: "0 auto" }}>
             <div className="mini">{prof.nome}{prof.profissao ? ` · ${prof.profissao}` : ""}</div>
@@ -446,6 +474,7 @@ export default function FichaPaciente({ params }) {
     const secoes = [...new Set(p0.map((p) => p.secao))];
     return (
       <div className={cls}>
+        {faixaProf}
         <main className="ficha-corpo pilha">
           <h1 ref={topo} tabIndex={-1} style={{ margin: "8px 0 0", fontSize: 26, outline: "none" }}>Confira suas respostas</h1>
           <p className="suave" style={{ margin: 0 }}>Se algo estiver errado, toque em <b>Alterar</b>.</p>
@@ -492,6 +521,7 @@ export default function FichaPaciente({ params }) {
 
   return (
     <div className={cls}>
+      {faixaProf}
       <header className="cabeca-paciente" style={{ padding: "16px 16px 14px" }}>
         <div style={{ maxWidth: 640, margin: "0 auto" }}>
           <div className="mini">{prof.nome}</div>
@@ -524,6 +554,7 @@ export default function FichaPaciente({ params }) {
             </div>
           )}
           {p.tipo === "campo" && <Campo f={p.campo} data={data} set={set} avancar={avancarAuto} />}
+          {ehFinal && modoProf && <div className="nota" style={{ fontSize: 15 }}>Entregue o aparelho ao paciente: ele mesmo deve ler, marcar os termos e escrever o nome.</div>}
           {ehFinal && <Final etapa={p.etapa} data={data} set={set} />}
         </section>
 
