@@ -117,3 +117,10 @@ input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-
 .escala-dor { display: grid; grid-template-columns: repeat(11, 1fr); gap: 4px; }
 .escala-dor button { min-height: 44px; padding: 0; border: 1px solid var(--borda); border-radius: 8px; background: var(--fundo); font: inherit; font-size: 15px; color: var(--texto); cursor: pointer; }
 .escala-dor button[aria-pressed=true] { background: var(--marca); border-color: var(--marca); color: #fff; font-weight: 700; }
+
+/* Celular: a escala de dor vira 2 linhas (0–5 e 6–10) com botões de 48px */
+@media (max-width: 520px) {
+  .escala-dor { grid-template-columns: repeat(6, 1fr); gap: 6px; }
+  .escala-dor button { min-height: 48px; font-size: 17px; }
+}
+.resumo-clinico { display: flex; flex-direction: column; gap: 4px; padding: 14px 16px; font-size: 15px; background: var(--marca-clara); border-color: #c5e3e0; }

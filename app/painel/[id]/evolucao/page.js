@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
 import Topo from "@/components/Topo";
@@ -88,6 +88,10 @@ export default function Evolucao({ params }) {
   const [excluidas, setExcluidas] = useState([]);
   const [podeEditar, setPodeEditar] = useState(false); // depende do supabase/historico_registros.sql
   const [editando, setEditando] = useState(null); // sessão sendo corrigida
+  const [avaliacao, setAvaliacao] = useState(null); // última avaliação com conclusão (diagnóstico e plano)
+  const [base, setBase] = useState(VAZIO); // como a sessão nova começa: vazia ou com o plano
+  const recuperou = useRef(false);
+  const formRef = useRef(VAZIO);
   const [urls, setUrls] = useState({});
   const [form, setForm] = useState(VAZIO);
   const [arquivos, setArquivos] = useState([]);
@@ -119,7 +123,21 @@ export default function Evolucao({ params }) {
     const { data: f } = await supabase.from("fichas").select("*").eq("id", params.id).maybeSingle();
     setFicha(f || null);
     if (!f) return;
-    const { data: ev } = await supabase.from("evolucoes").select("*").in("ficha_id", (await fichasDoPaciente(supabase, f)).map((x) => x.id)).order("data", { ascending: false });
+    const idsFichas = (await fichasDoPaciente(supabase, f)).map((x) => x.id);
+    const { data: ev } = await supabase.from("evolucoes").select("*").in("ficha_id", idsFichas).order("data", { ascending: false });
+    // Plano de tratamento: a última avaliação com conclusão
+    const { data: avs } = await supabase.from("avaliacoes").select("*").in("ficha_id", idsFichas).order("data", { ascending: false }).limit(20);
+    const av = (avs || []).find((a) => !a.excluido_em && a.dados?.conclusao) || null;
+    setAvaliacao(av);
+    const c = av?.dados?.conclusao;
+    if (c && (c.planoTecnicas?.length || c.planoRegioes || c.planoOrientacoes)) {
+      const plano = { ...VAZIO, tecnicas: c.planoTecnicas || [], regioes: c.planoRegioes || "", orientacoes: c.planoOrientacoes || "" };
+      setBase(plano);
+      if (!recuperou.current && JSON.stringify(formRef.current) === JSON.stringify(VAZIO)) {
+        setForm(plano);
+        setAviso("A sessão já veio com o plano de tratamento. Ajuste só o que mudou.");
+      }
+    }
     setEvolucoes((ev || []).filter((e) => !e.excluido_em));
     setExcluidas((ev || []).filter((e) => e.excluido_em));
     setPodeEditar(!!ev?.length && "excluido_em" in ev[0]);
@@ -136,12 +154,13 @@ export default function Evolucao({ params }) {
 
   useEffect(() => {
     const r = lerR(chaveRascunho(params.id), VAZIO);
-    if (r) { setForm(r); setAviso("Recuperamos o que você estava escrevendo nesta sessão."); }
+    if (r) { recuperou.current = true; setForm(r); setAviso("Recuperamos o que você estava escrevendo nesta sessão."); }
     setRascunhoPronto(true);
   }, [params.id]);
+  formRef.current = form;
   // A correção de uma sessão antiga não vai para o rascunho de sessão nova
-  useEffect(() => { if (rascunhoPronto && !editando) gravarR(chaveRascunho(params.id), form, VAZIO); }, [form, rascunhoPronto, params.id, editando]);
-  useAvisoSaida(JSON.stringify(form) !== JSON.stringify(VAZIO) || arquivos.length > 0);
+  useEffect(() => { if (rascunhoPronto && !editando) gravarR(chaveRascunho(params.id), form, base); }, [form, rascunhoPronto, params.id, editando, base]);
+  useAvisoSaida(JSON.stringify(form) !== JSON.stringify(base) || arquivos.length > 0);
 
   function anexar(k, texto) {
     setForm((f) => {
@@ -197,7 +216,7 @@ export default function Evolucao({ params }) {
   }
 
   function iniciarEdicao(ev) {
-    const sujo = JSON.stringify(form) !== JSON.stringify(VAZIO);
+    const sujo = JSON.stringify(form) !== JSON.stringify(base);
     if (sujo && !editando && !window.confirm("Você tem uma sessão nova não salva. Ela continua guardada no rascunho. Corrigir a sessão antiga agora?")) return;
     setEditando(ev);
     setForm({
@@ -212,7 +231,7 @@ export default function Evolucao({ params }) {
   }
   function cancelarEdicao() {
     setEditando(null); setAviso(""); setMsg(""); setQuando(agoraLocal());
-    setForm(lerR(chaveRascunho(params.id), VAZIO) || VAZIO);
+    setForm(lerR(chaveRascunho(params.id), VAZIO) || base);
   }
   async function excluir(ev) {
     const motivo = window.prompt(`Excluir a sessão de ${dataBR(ev.data)}?\n\nEla sai da lista, mas fica guardada no histórico. Escreva o motivo (obrigatório):`);
@@ -263,15 +282,16 @@ export default function Evolucao({ params }) {
       setSalvando(false);
       if (error) return setMsg("Não foi possível salvar a correção.");
       setEditando(null); setArquivos([]); setAviso(""); setQuando(agoraLocal());
-      setForm(lerR(chaveRascunho(ficha.id), VAZIO) || VAZIO);
+      setForm(lerR(chaveRascunho(ficha.id), VAZIO) || base);
       setMsg("Correção salva. A versão anterior ficou no histórico.");
       return carregar();
     }
     const { error } = await supabase.from("evolucoes").insert({ ficha_id: ficha.id, profissional_id: userId, ...campos, fotos });
     setSalvando(false);
     if (error) return setMsg("Não foi possível salvar a evolução.");
-    setForm(VAZIO); setArquivos([]); setAutorizou(false); setAviso(""); setQuando(agoraLocal());
-    gravarR(chaveRascunho(ficha.id), VAZIO, VAZIO);
+    recuperou.current = false;
+    setForm(base); setArquivos([]); setAutorizou(false); setAviso(""); setQuando(agoraLocal());
+    gravarR(chaveRascunho(ficha.id), base, base);
     setMsg("Evolução salva!"); setSalvou(true);
     carregar();
   }
@@ -313,6 +333,12 @@ export default function Evolucao({ params }) {
   const extrasPreenchidos = [form.regioes.trim() && "regiões", Object.values(form.sinais || {}).some((v) => String(v).trim()) && "sinais vitais", arquivos.length && "fotos"].filter(Boolean);
   const comDor = cronologica.filter((e) => e.dor_antes !== null || e.dor_depois !== null).slice(-8);
   const sumario = { cursor: "pointer", fontWeight: 600, minHeight: 44, display: "flex", alignItems: "center" };
+  const conc = avaliacao?.dados?.conclusao || {};
+  const previstas = parseInt(String(conc.sessoes || "").replace(/\D/g, ""), 10) || null;
+  const desdeAval = avaliacao ? evolucoes.filter((e) => new Date(e.data) > new Date(avaliacao.data)).length : evolucoes.length;
+  const numeroSessao = desdeAval + 1;
+  const reavaliar = !avaliacao ? evolucoes.length >= 3 : (previstas ? numeroSessao > previstas : desdeAval >= 10);
+  const condutaAlerta = (a) => r._condutas?.[a.id]?.tipo;
 
   return (
     <>
@@ -335,19 +361,30 @@ export default function Evolucao({ params }) {
           </div>
         </div>
 
+        <section className="cartao nao-imprimir resumo-clinico" aria-label="Resumo clínico">
+          {r.queixa && <div><b>Queixa:</b> {r.queixa}{r.desde ? ` (${String(r.desde).toLowerCase()})` : ""}{typeof r.dor_hoje === "number" ? ` · dor inicial ${r.dor_hoje}/10` : ""}</div>}
+          {r.expect && <div><b>Objetivo do paciente:</b> {r.expect}</div>}
+          {conc.diagnostico && <div><b>Diagnóstico:</b> {conc.diagnostico}</div>}
+          {(conc.objCurto || conc.objLongo) && <div><b>Metas:</b> {[conc.objCurto, conc.objLongo].filter(Boolean).join(" → ")}</div>}
+          {avaliacao
+            ? <div><b>Plano:</b> {[conc.frequencia, previstas ? `${previstas} sessões` : null].filter(Boolean).join(" · ") || "sem frequência definida"}{previstas ? ` · esta é a sessão ${numeroSessao} de ${previstas}` : ""}</div>
+            : <div className="suave">Sem diagnóstico e plano ainda. <a href={`/painel/${ficha.id}/avaliacao`}>Fazer a avaliação física</a></div>}
+          {avaliacao && reavaliar && <div style={{ color: "var(--cuidado)", fontWeight: 600 }}>Hora de reavaliar: {previstas && numeroSessao > previstas ? "as sessões previstas terminaram" : `${desdeAval} sessões desde a última avaliação`}. <a href={`/painel/${ficha.id}/avaliacao`}>Reavaliar</a></div>}
+        </section>
+
         {(alertas.length > 0 || cuidados.length > 0) && (
           <div className="nota nao-imprimir" style={{ margin: 0 }}>
-            {alertas.length > 0 && <div><b style={{ color: "var(--alerta)" }}>Alerta:</b> {alertas.map((a) => a.resumo || a.titulo || a).join("; ")}</div>}
+            {alertas.length > 0 && <div><b style={{ color: "var(--alerta)" }}>Alerta:</b> {alertas.map((a) => (a.resumo || a.titulo || a) + (condutaAlerta(a) ? ` (${condutaAlerta(a).toLowerCase()})` : " (sem conduta registrada)")).join("; ")}</div>}
             {cuidados.length > 0 && <div><b style={{ color: "var(--cuidado)" }}>Cuidado:</b> {cuidados.map((c) => `${c.resumo} → adaptar ${c.adapta}`).join("; ")}</div>}
           </div>
         )}
 
-        <TriagemPendente ficha={ficha} tecnicas={tecAtuais} onSalvo={setFicha} />
+        <TriagemPendente ficha={ficha} tecnicas={tecAtuais} onSalvo={setFicha} recolhido />
 
         <div className="grade">
           <form id="form-sessao" onSubmit={salvar} className="cartao pilha nao-imprimir" style={editando ? { borderColor: "var(--cuidado)", boxShadow: "0 0 0 1px var(--cuidado)" } : undefined}>
             <div className="linha" style={{ justifyContent: "space-between" }}>
-              <h2 style={{ margin: 0 }}>{editando ? "Corrigir sessão" : "Nova sessão"}</h2>
+              <h2 style={{ margin: 0 }}>{editando ? "Corrigir sessão" : previstas ? `Sessão ${numeroSessao} de ${previstas}` : "Nova sessão"}</h2>
               {editando
                 ? <button type="button" className="botao sec" onClick={cancelarEdicao}>Cancelar correção</button>
                 : evolucoes.length > 0 && <button type="button" className="botao sec" onClick={repetirUltima}>Repetir última sessão</button>}

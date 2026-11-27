@@ -10,9 +10,11 @@ import HistoricoRegistro from "@/components/HistoricoRegistro";
 import { lerRascunho, gravarRascunho, useAvisoSaida } from "@/lib/rascunho";
 import { agoraLocal } from "@/lib/datas";
 import { BotaoMicrofone } from "@/components/Voz";
+import { TECNICAS } from "@/lib/ficha";
 import { ADM, FORCA, FUNCIONAIS, REGIOES_CORPO, sugerirRegioes, nomeTeste } from "@/lib/testes";
 
-const CONCLUSAO_VAZIA = { diagnostico: "", prognostico: "", objCurto: "", objLongo: "", frequencia: "", sessoes: "", condutas: "" };
+// planoTecnicas, planoRegioes e planoOrientacoes já abrem preenchidos em cada nova sessão da evolução
+const CONCLUSAO_VAZIA = { diagnostico: "", prognostico: "", objCurto: "", objLongo: "", frequencia: "", sessoes: "", condutas: "", planoTecnicas: [], planoRegioes: "", planoOrientacoes: "" };
 const VAZIO = { testes: {}, adm: {}, forca: {}, func: {}, pg: [], pgObs: "", postura: "", obs: "", conclusao: CONCLUSAO_VAZIA };
 const CAMPOS_CONCLUSAO = [
   { id: "diagnostico", nome: "Diagnóstico cinético-funcional", area: true, ph: "Ex.: disfunção do movimento de flexão do ombro D por dor e fraqueza do manguito rotador" },
@@ -79,7 +81,10 @@ function limpar(form) {
   if (form.postura.trim()) dados.postura = form.postura.trim();
   if (form.obs.trim()) dados.obs = form.obs.trim();
   const conc = {};
-  for (const [k, v] of Object.entries(form.conclusao || {})) if (String(v || "").trim()) conc[k] = String(v).trim();
+  for (const [k, v] of Object.entries(form.conclusao || {})) {
+    if (Array.isArray(v)) { if (v.length) conc[k] = v; }
+    else if (String(v || "").trim()) conc[k] = String(v).trim();
+  }
   if (Object.keys(conc).length) dados.conclusao = conc;
   return dados;
 }
@@ -172,6 +177,7 @@ export default function Avaliacao({ params }) {
   const [excluidas, setExcluidas] = useState([]);
   const [podeEditar, setPodeEditar] = useState(false); // depende do supabase/historico_registros.sql
   const [editando, setEditando] = useState(null);
+  const [tecPerfil, setTecPerfil] = useState([]);
 
   // Rascunho automático: uma avaliação longa não se perde ao trocar de aba ou recarregar
   useEffect(() => {
@@ -189,8 +195,9 @@ export default function Avaliacao({ params }) {
     const { data: f } = await supabase.from("fichas").select("*").eq("id", params.id).maybeSingle();
     setFicha(f || null);
     if (!f) return;
-    const { data: p } = await supabase.from("profiles").select("testes_favoritos").eq("id", user.id).maybeSingle();
+    const { data: p } = await supabase.from("profiles").select("testes_favoritos, tecnicas").eq("id", user.id).maybeSingle();
     setFavoritos(p?.testes_favoritos || []);
+    setTecPerfil(p?.tecnicas || []);
     const { data: av, error } = await supabase.from("avaliacoes").select("*").in("ficha_id", (await fichasDoPaciente(supabase, f)).map((x) => x.id)).order("data", { ascending: true });
     if (error) setMsg("Não foi possível carregar as avaliações. Confira se o arquivo supabase/avaliacao.sql foi rodado no Supabase.");
     setAvaliacoes((av || []).filter((a) => !a.excluido_em));
@@ -501,8 +508,13 @@ export default function Avaliacao({ params }) {
             <textarea id="obs" value={form.obs} onChange={(e) => setForm({ ...form, obs: e.target.value })} />
           </Secao>
 
-          <Secao titulo="Conclusão: diagnóstico e plano de tratamento" aberta n={Object.values(form.conclusao || {}).filter((v) => String(v || "").trim()).length}>
-            {anterior.conclusao?.diagnostico && <p className="suave" style={{ margin: 0 }}>Diagnóstico anterior: {anterior.conclusao.diagnostico}</p>}
+          <Secao titulo="Conclusão: diagnóstico e plano de tratamento" aberta n={Object.values(form.conclusao || {}).filter((v) => (Array.isArray(v) ? v.length : String(v || "").trim())).length}>
+            {anterior.conclusao && !editando && (
+              <div className="linha" style={{ justifyContent: "space-between" }}>
+                <span className="suave">{anterior.conclusao.diagnostico ? `Diagnóstico anterior: ${anterior.conclusao.diagnostico}` : "A avaliação anterior tem conclusão."}</span>
+                <button type="button" className="botao sec" style={{ minHeight: 40 }} onClick={() => setForm((f) => ({ ...f, conclusao: { ...CONCLUSAO_VAZIA, ...anterior.conclusao } }))}>Usar a conclusão anterior</button>
+              </div>
+            )}
             {CAMPOS_CONCLUSAO.map((c) => {
               const set = (v) => setForm((f) => ({ ...f, conclusao: { ...f.conclusao, [c.id]: v } }));
               return (
@@ -517,6 +529,23 @@ export default function Avaliacao({ params }) {
                 </div>
               );
             })}
+            <div className="pilha" style={{ gap: 10, padding: 14, background: "var(--marca-clara)", borderRadius: 12 }}>
+              <div><b>Plano de cada sessão</b><div className="suave">Já vem preenchido em toda nova sessão da evolução. Na sessão, você só ajusta o que mudou.</div></div>
+              <div>
+                <div className="rotulo">Técnicas</div>
+                <div className="chips">
+                  {TECNICAS.filter((t) => !tecPerfil.length || tecPerfil.includes(t.id) || (form.conclusao?.planoTecnicas || []).includes(t.id)).map((t) => {
+                    const lista = form.conclusao?.planoTecnicas || [];
+                    const marcado = lista.includes(t.id);
+                    return (
+                      <label key={t.id} className="chip"><input type="checkbox" checked={marcado} onChange={() => setForm((f) => ({ ...f, conclusao: { ...f.conclusao, planoTecnicas: marcado ? lista.filter((x) => x !== t.id) : [...lista, t.id] } }))} /><span>{t.nome.split(" (")[0]}</span></label>
+                    );
+                  })}
+                </div>
+              </div>
+              <div><label className="rotulo" htmlFor="c_planoRegioes">Regiões tratadas</label><input id="c_planoRegioes" type="text" placeholder="Ex.: lombar, glúteo" value={form.conclusao?.planoRegioes || ""} onChange={(e) => setForm((f) => ({ ...f, conclusao: { ...f.conclusao, planoRegioes: e.target.value } }))} /></div>
+              <div><label className="rotulo" htmlFor="c_planoOri">Orientações para casa</label><textarea id="c_planoOri" placeholder="Ex.: caminhar 15 minutos por dia" value={form.conclusao?.planoOrientacoes || ""} onChange={(e) => setForm((f) => ({ ...f, conclusao: { ...f.conclusao, planoOrientacoes: e.target.value } }))} style={{ minHeight: 60 }} /></div>
+            </div>
           </Secao>
 
           {msg && <p role="status" style={{ margin: 0 }}>{msg}</p>}
@@ -545,6 +574,9 @@ export default function Avaliacao({ params }) {
                 {d.conclusao && (
                   <div style={{ marginTop: 8, padding: "8px 12px", background: "var(--marca-clara)", borderRadius: 10 }}>
                     {CAMPOS_CONCLUSAO.filter((c) => d.conclusao[c.id]).map((c) => <div key={c.id} style={{ margin: "2px 0" }}><b>{c.nome}:</b> {d.conclusao[c.id]}</div>)}
+                    {(d.conclusao.planoTecnicas?.length > 0 || d.conclusao.planoRegioes || d.conclusao.planoOrientacoes) && (
+                      <div style={{ margin: "2px 0" }}><b>Plano de cada sessão:</b> {[TECNICAS.filter((t) => (d.conclusao.planoTecnicas || []).includes(t.id)).map((t) => t.nome.split(" (")[0]).join(", "), d.conclusao.planoRegioes, d.conclusao.planoOrientacoes && `para casa: ${d.conclusao.planoOrientacoes}`].filter(Boolean).join(" · ")}</div>
+                    )}
                   </div>
                 )}
                 {a.fotos?.length > 0 && (
