@@ -4,6 +4,10 @@ import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import Topo from "@/components/Topo";
 import AbasPaciente from "@/components/AbasPaciente";
+import TriagemPendente, { tecnicasAtuais } from "@/components/TriagemPendente";
+import Impressao from "@/components/Impressao";
+
+const CONDUTAS = ["Encaminhado ao médico", "Liberado para atendimento após avaliação", "Orientado e em observação"];
 import { calcularAlertas, montarEtapas, formatarResposta, ROTULOS_ANTIGOS } from "@/lib/ficha";
 
 function idade(nasc) {
@@ -18,6 +22,22 @@ export default function DetalheFicha({ params }) {
   const supabase = createClient();
   const [f, setF] = useState(undefined);
   const [copiado, setCopiado] = useState(false);
+  const [perfil, setPerfil] = useState(null);
+  const [conduta, setConduta] = useState({});
+  const [msgConduta, setMsgConduta] = useState("");
+
+  // Registro do que foi feito diante de cada sinal de alerta (protege o profissional)
+  async function salvarConduta(alertaId) {
+    const c = conduta[alertaId] || {};
+    if (!c.tipo) return setMsgConduta("Escolha a conduta.");
+    const condutas = { ...(f.respostas?._condutas || {}), [alertaId]: { tipo: c.tipo, obs: (c.obs || "").trim(), em: new Date().toISOString() } };
+    const respostas = { ...(f.respostas || {}), _condutas: condutas };
+    const { error } = await supabase.from("fichas").update({ respostas }).eq("id", f.id);
+    if (error) return setMsgConduta("Não foi possível salvar a conduta.");
+    setF({ ...f, respostas });
+    setConduta({ ...conduta, [alertaId]: undefined });
+    setMsgConduta("");
+  }
 
   async function alternarAtivo() {
     const ativo = f.ativo === false;
@@ -41,6 +61,11 @@ export default function DetalheFicha({ params }) {
 
   useEffect(() => {
     (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: p } = await supabase.from("profiles").select("tecnicas").eq("id", user.id).maybeSingle();
+        setPerfil(p);
+      }
       const { data } = await supabase.from("fichas").select("*").eq("id", params.id).maybeSingle();
       setF(data || null);
       if (data && data.status === "respondida" && !data.vista_em) {
@@ -84,7 +109,7 @@ export default function DetalheFicha({ params }) {
   }
 
   const r = f.respostas || {};
-  const tecnicas = f.tecnicas || [];
+  const tecnicas = tecnicasAtuais(f, perfil);
   const { alertas, cuidados, duvidas } = calcularAlertas(r, tecnicas);
   const etapas = montarEtapas(tecnicas, f.opcionais || {});
   const anos = idade(r.nasc);
@@ -94,6 +119,7 @@ export default function DetalheFicha({ params }) {
       <Topo />
       <main className="conteudo pilha">
         <AbasPaciente id={f.id} atual="anamnese" />
+        <Impressao ficha={f} titulo="Ficha de anamnese">
         {avisoInativo(f)}
         <div className="linha" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
           <div>
@@ -110,8 +136,33 @@ export default function DetalheFicha({ params }) {
         <div className="grade">
           <div className="alerta">
             <div style={{ fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em" }}><b>Sinais de alerta</b></div>
-            {alertas.length ? alertas.map((a) => <div key={a.id} style={{ marginTop: 6 }}>{a.resumo}</div>) : <div style={{ marginTop: 6 }}>Nenhum marcado.</div>}
-            {alertas.length > 0 && <div className="suave" style={{ marginTop: 8 }}>Considere pedir avaliação médica antes da sessão.</div>}
+            {alertas.length ? alertas.map((a) => {
+              const feito = r._condutas?.[a.id];
+              const c = conduta[a.id] || {};
+              return (
+                <div key={a.id} style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid #f0c3be" }}>
+                  <div>{a.resumo}</div>
+                  {feito && !c.editando ? (
+                    <div style={{ fontSize: 14, marginTop: 4 }}>
+                      <b>Conduta:</b> {feito.tipo}{feito.obs ? ` — ${feito.obs}` : ""} <span className="suave">({new Date(feito.em).toLocaleDateString("pt-BR")})</span>
+                      <button type="button" className="nao-imprimir" onClick={() => setConduta({ ...conduta, [a.id]: { tipo: feito.tipo, obs: feito.obs, editando: true } })} style={{ border: 0, background: "none", color: "var(--marca)", font: "inherit", fontSize: 14, cursor: "pointer", minHeight: 36 }}>Alterar</button>
+                    </div>
+                  ) : (
+                    <div className="pilha nao-imprimir" style={{ gap: 6, marginTop: 6 }}>
+                      <label className="suave" htmlFor={"cd_" + a.id} style={{ fontSize: 13 }}>Conduta tomada</label>
+                      <select id={"cd_" + a.id} value={c.tipo || ""} onChange={(e) => setConduta({ ...conduta, [a.id]: { ...c, tipo: e.target.value } })}>
+                        <option value="">Escolha...</option>
+                        {CONDUTAS.map((x) => <option key={x}>{x}</option>)}
+                      </select>
+                      <input type="text" aria-label="Observação da conduta" placeholder="Observação (opcional)" value={c.obs || ""} onChange={(e) => setConduta({ ...conduta, [a.id]: { ...c, obs: e.target.value } })} />
+                      <div><button type="button" className="botao sec" onClick={() => salvarConduta(a.id)}>Registrar conduta</button></div>
+                    </div>
+                  )}
+                </div>
+              );
+            }) : <div style={{ marginTop: 6 }}>Nenhum marcado.</div>}
+            {msgConduta && <p className="erro" role="alert" style={{ margin: "6px 0 0" }}>{msgConduta}</p>}
+            {alertas.length > 0 && alertas.some((a) => !r._condutas?.[a.id]) && <div className="suave" style={{ marginTop: 8 }}>Considere pedir avaliação médica antes da sessão e registre a conduta.</div>}
           </div>
           <div className="cuidado">
             <div style={{ fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em" }}><b>Cuidados com técnicas</b></div>
@@ -124,6 +175,8 @@ export default function DetalheFicha({ params }) {
             </div>
           )}
         </div>
+
+        <TriagemPendente ficha={f} tecnicas={tecnicas} onSalvo={setF} />
 
         <div className="grade">
           <div className="cartao"><div className="suave">Dor hoje</div><div className="numero">{r.dor_hoje ?? "—"}<span className="suave">/10</span></div></div>
@@ -145,7 +198,7 @@ export default function DetalheFicha({ params }) {
         ))}
         {(() => {
           const usados = new Set(etapas.flatMap((et) => et.fields.flatMap((fd) => fd.type === "yn" ? fd.items.flatMap((it) => [it.id, it.id + "_outro"]) : [fd.id, fd.id + "_outro"])));
-          const extras = Object.keys(r).filter((k) => !usados.has(k) && r[k] !== "" && r[k] !== null && !/_outro$/.test(k));
+          const extras = Object.keys(r).filter((k) => !usados.has(k) && !k.startsWith("_") && r[k] !== "" && r[k] !== null && !/_outro$/.test(k));
           if (!extras.length) return null;
           return (
             <section className="cartao">
@@ -157,6 +210,7 @@ export default function DetalheFicha({ params }) {
           );
         })()}
         <p className="suave">{f.modo === "presencial" ? "Preenchida no atendimento, junto com o paciente, em" : "Respondida pelo paciente em"} {new Date(f.respondida_em).toLocaleString("pt-BR")}.</p>
+        </Impressao>
       </main>
     </>
   );

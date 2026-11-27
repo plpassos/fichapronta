@@ -5,6 +5,10 @@ import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
 import Topo from "@/components/Topo";
 import AbasPaciente from "@/components/AbasPaciente";
+import Impressao from "@/components/Impressao";
+import TriagemPendente, { tecnicasAtuais } from "@/components/TriagemPendente";
+import { agoraLocal } from "@/lib/datas";
+import { lerRascunho as lerR, gravarRascunho as gravarR, useAvisoSaida } from "@/lib/rascunho";
 import { BotaoMicrofone } from "@/components/Voz";
 import { TECNICAS, calcularAlertas } from "@/lib/ficha";
 
@@ -44,16 +48,6 @@ const VAZIO = { dor_antes: "", dor_depois: "", sinais: {}, tecnicas: [], regioes
 
 // Rascunho no próprio aparelho: se a tela fechar no meio da sessão, nada se perde
 const chaveRascunho = (id) => `fp-rascunho-evolucao-${id}`;
-function lerRascunho(id) {
-  try { const r = JSON.parse(localStorage.getItem(chaveRascunho(id)) || "null"); return r && typeof r === "object" ? { ...VAZIO, ...r } : null; } catch { return null; }
-}
-function gravarRascunho(id, form) {
-  try {
-    const vazio = JSON.stringify(form) === JSON.stringify(VAZIO);
-    if (vazio) localStorage.removeItem(chaveRascunho(id));
-    else localStorage.setItem(chaveRascunho(id), JSON.stringify(form));
-  } catch {}
-}
 
 function EscalaDor({ id, rotulo, valor, onChange }) {
   return (
@@ -101,12 +95,15 @@ export default function Evolucao({ params }) {
   const [aviso, setAviso] = useState("");
   const [salvou, setSalvou] = useState(false);
   const [rascunhoPronto, setRascunhoPronto] = useState(false);
+  const [quando, setQuando] = useState(() => agoraLocal());
+  const [perfilTec, setPerfilTec] = useState(null);
 
   async function carregar() {
     const { data: { user } } = await supabase.auth.getUser();
     setUserId(user.id);
-    const { data: perfil, error: erroPerfil } = await supabase.from("profiles").select("frases").eq("id", user.id).maybeSingle();
+    const { data: perfil, error: erroPerfil } = await supabase.from("profiles").select("frases, tecnicas").eq("id", user.id).maybeSingle();
     if (!erroPerfil) {
+      setPerfilTec(perfil);
       setPodeSalvarFrases(true);
       const fr = perfil?.frases || {};
       setFrases({
@@ -131,11 +128,12 @@ export default function Evolucao({ params }) {
   useEffect(() => { carregar(); }, [params.id]);
 
   useEffect(() => {
-    const r = lerRascunho(params.id);
+    const r = lerR(chaveRascunho(params.id), VAZIO);
     if (r) { setForm(r); setAviso("Recuperamos o que você estava escrevendo nesta sessão."); }
     setRascunhoPronto(true);
   }, [params.id]);
-  useEffect(() => { if (rascunhoPronto) gravarRascunho(params.id, form); }, [form, rascunhoPronto, params.id]);
+  useEffect(() => { if (rascunhoPronto) gravarR(chaveRascunho(params.id), form, VAZIO); }, [form, rascunhoPronto, params.id]);
+  useAvisoSaida(JSON.stringify(form) !== JSON.stringify(VAZIO) || arquivos.length > 0);
 
   function anexar(k, texto) {
     setForm((f) => {
@@ -200,6 +198,9 @@ export default function Evolucao({ params }) {
     const temSinal = Object.values(form.sinais || {}).some((v) => String(v).trim());
     const vazio = !String(form.dor_antes).trim() && !String(form.dor_depois).trim() && !temSinal && !form.tecnicas.length && !form.regioes.trim() && !form.notas.trim() && !form.orientacoes.trim() && !arquivos.length;
     if (vazio) return setMsg("Preencha pelo menos um campo antes de salvar a evolução.");
+    const dataSessao = new Date(quando);
+    if (!quando || isNaN(dataSessao)) return setMsg("Confira a data e a hora da sessão.");
+    if (dataSessao.getTime() > Date.now() + 5 * 60000) return setMsg("A data da sessão não pode ser no futuro.");
     setSalvando(true);
     const fotos = [];
     for (const arq of arquivos) {
@@ -213,6 +214,7 @@ export default function Evolucao({ params }) {
     const { error } = await supabase.from("evolucoes").insert({
       ficha_id: ficha.id,
       profissional_id: userId,
+      data: dataSessao.toISOString(),
       dor_antes: numOuNulo(form.dor_antes),
       dor_depois: numOuNulo(form.dor_depois),
       sinais,
@@ -224,8 +226,8 @@ export default function Evolucao({ params }) {
     });
     setSalvando(false);
     if (error) return setMsg("Não foi possível salvar a evolução.");
-    setForm(VAZIO); setArquivos([]); setAutorizou(false); setAviso("");
-    gravarRascunho(ficha.id, VAZIO);
+    setForm(VAZIO); setArquivos([]); setAutorizou(false); setAviso(""); setQuando(agoraLocal());
+    gravarR(chaveRascunho(ficha.id), VAZIO, VAZIO);
     setMsg("Evolução salva!"); setSalvou(true);
     carregar();
   }
@@ -250,7 +252,8 @@ export default function Evolucao({ params }) {
 
   const r = ficha.respostas || {};
   const fotosOk = r.fotos_ok === true;
-  const { alertas, cuidados } = calcularAlertas(r, ficha.tecnicas || []);
+  const tecAtuais = tecnicasAtuais(ficha, perfilTec);
+  const { alertas, cuidados } = calcularAlertas(r, tecAtuais);
   const ultima = evolucoes[0];
   const cronologica = [...evolucoes].reverse();
   const linkPaciente = ficha.token_evolucao && typeof window !== "undefined" ? `${window.location.origin}/e/${ficha.token_evolucao}` : "";
@@ -272,6 +275,7 @@ export default function Evolucao({ params }) {
       <div className="nao-imprimir"><Topo /></div>
       <main className="conteudo pilha">
         <AbasPaciente id={ficha.id} atual="evolucao" />
+        <Impressao ficha={ficha} titulo="Evolução do tratamento">
         {ficha.ativo === false && <div className="cartao nao-imprimir" style={{ background: "#eceff0" }}>Paciente inativo. Você ainda pode registrar evoluções.</div>}
 
         <div className="linha" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
@@ -294,20 +298,26 @@ export default function Evolucao({ params }) {
           </div>
         )}
 
+        <TriagemPendente ficha={ficha} tecnicas={tecAtuais} onSalvo={setFicha} />
+
         <div className="grade">
           <form onSubmit={salvar} className="cartao pilha nao-imprimir">
             <div className="linha" style={{ justifyContent: "space-between" }}>
-              <h2 style={{ margin: 0 }}>Nova sessão · {dataBR(new Date())}</h2>
+              <h2 style={{ margin: 0 }}>Nova sessão</h2>
               {evolucoes.length > 0 && <button type="button" className="botao sec" onClick={repetirUltima}>Repetir última sessão</button>}
             </div>
             {aviso && <p role="status" className="suave" style={{ margin: 0 }}>{aviso}</p>}
+            <div>
+              <label className="rotulo" htmlFor="quando">Data e hora da sessão</label>
+              <input id="quando" type="datetime-local" value={quando} max={agoraLocal()} onChange={(e) => setQuando(e.target.value)} style={{ maxWidth: 260 }} />
+            </div>
             <EscalaDor id="rot-da" rotulo="Dor antes" valor={form.dor_antes} onChange={(v) => setForm((f) => ({ ...f, dor_antes: v }))} />
             <EscalaDor id="rot-dd" rotulo="Dor depois" valor={form.dor_depois} onChange={(v) => setForm((f) => ({ ...f, dor_depois: v }))} />
 
             <div>
               <div className="rotulo">Técnicas</div>
               <div className="chips">
-                {TECNICAS.filter((t) => (ficha.tecnicas || []).length === 0 || (ficha.tecnicas || []).includes(t.id)).map((t) => (
+                {TECNICAS.filter((t) => tecAtuais.length === 0 || tecAtuais.includes(t.id)).map((t) => (
                   <label key={t.id} className="chip"><input type="checkbox" checked={form.tecnicas.includes(t.id)} onChange={() => alternarTecnica(t.id)} /><span>{t.nome.split(" (")[0]}</span></label>
                 ))}
               </div>
@@ -426,6 +436,7 @@ export default function Evolucao({ params }) {
             </details>
           </section>
         </div>
+        </Impressao>
       </main>
     </>
   );
