@@ -51,7 +51,9 @@ export default function Pacientes() {
       setLista([]);
       return;
     }
-    const { data: ev } = await supabase.from("evolucoes").select("ficha_id, data").order("data", { ascending: false }).limit(5000);
+    let { data: ev, error: erroEv } = await supabase.from("evolucoes").select("ficha_id, data, excluido_em").order("data", { ascending: false }).limit(5000);
+    if (erroEv) ({ data: ev } = await supabase.from("evolucoes").select("ficha_id, data").order("data", { ascending: false }).limit(5000));
+    ev = (ev || []).filter((e) => !e.excluido_em);
     const mapa = {};
     (ev || []).forEach((e) => { if (!mapa[e.ficha_id]) mapa[e.ficha_id] = e.data; });
     setUltimaSessao(mapa);
@@ -147,7 +149,7 @@ export default function Pacientes() {
               <div key={p.id} className="linha" style={{ justifyContent: "space-between", padding: "12px 0", borderTop: i ? "1px solid var(--linha)" : 0, opacity: p.ativo === false ? 0.75 : 1 }}>
                 <div style={{ minWidth: 0, flex: "1 1 260px" }}>
                   <div className="linha" style={{ gap: 8 }}>
-                    <Link href={`/painel/${p.id}`} style={{ fontWeight: 600, color: "var(--texto)" }}>{r.nome || p.paciente_nome}</Link>
+                    <Link href={p._nova ? `/painel/${p._nova.id}` : `/painel/${p.id}/evolucao`} style={{ fontWeight: 600, color: "var(--texto)" }}>{r.nome || p.paciente_nome}</Link>
                     {p.ativo === false && <span className="etiqueta etq-pend">Inativo desde {dataBR(p.inativado_em)}</span>}
                     {p._pendente && <span className="etiqueta etq-pend">Ficha pendente</span>}
                     {p._nova && <span className="etiqueta etq-ok">Ficha nova</span>}

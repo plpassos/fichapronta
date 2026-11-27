@@ -16,7 +16,7 @@ export function perguntasPendentes(ficha, tecnicas) {
   return precaucoesAtivas(tecnicas).filter((p) => r[p.id] === undefined);
 }
 
-export default function TriagemPendente({ ficha, tecnicas, onSalvo }) {
+export default function TriagemPendente({ ficha, tecnicas, onSalvo, recolhido = false }) {
   const supabase = createClient();
   const pendentes = perguntasPendentes(ficha, tecnicas);
   const [resp, setResp] = useState({});
@@ -38,12 +38,10 @@ export default function TriagemPendente({ ficha, tecnicas, onSalvo }) {
     onSalvo({ ...ficha, respostas, tecnicas });
   }
 
-  return (
-    <section className="cuidado pilha nao-imprimir" style={{ gap: 10 }} role="region" aria-label="Triagem pendente">
-      <div>
-        <b>Triagem pendente{nomes.length ? `: ${nomes.join(", ")}` : ""}</b>
-        <div style={{ fontSize: 14 }}>O paciente ainda não respondeu estas perguntas de segurança. Pergunte antes de aplicar a técnica.</div>
-      </div>
+  const titulo = `Triagem pendente${nomes.length ? `: ${nomes.join(", ")}` : ""} (${pendentes.length} pergunta${pendentes.length > 1 ? "s" : ""})`;
+  const corpo = (
+    <>
+      <div style={{ fontSize: 14 }}>O paciente ainda não respondeu estas perguntas de segurança. Pergunte antes de aplicar a técnica.</div>
       {pendentes.map((p) => (
         <div key={p.id} role="group" aria-label={p.q}>
           <div style={{ fontSize: 15, marginBottom: 6 }}>{p.q}</div>
@@ -56,6 +54,20 @@ export default function TriagemPendente({ ficha, tecnicas, onSalvo }) {
       ))}
       {msg && <p className="erro" role="alert" style={{ margin: 0 }}>{msg}</p>}
       <div><button type="button" className="botao" onClick={salvar} disabled={salvando}>{salvando ? "Salvando..." : "Salvar respostas da triagem"}</button></div>
+    </>
+  );
+  if (recolhido) {
+    return (
+      <details className="cuidado nao-imprimir" style={{ padding: "4px 16px" }}>
+        <summary style={{ cursor: "pointer", fontWeight: 700, minHeight: 44, display: "flex", alignItems: "center" }}>{titulo}</summary>
+        <div className="pilha" style={{ gap: 10, paddingBottom: 12 }}>{corpo}</div>
+      </details>
+    );
+  }
+  return (
+    <section className="cuidado pilha nao-imprimir" style={{ gap: 10 }} role="region" aria-label="Triagem pendente">
+      <b>{titulo}</b>
+      {corpo}
     </section>
   );
 }

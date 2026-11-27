@@ -29,6 +29,10 @@ export default function EvolucaoPaciente({ params }) {
     setCarregando(true);
     const { data } = await supabase.rpc("evolucao_publica", { p_token: params.token, p_nasc: nasc });
     setCarregando(false);
+    if (data?.bloqueado) {
+      setTentativas(5);
+      return setErro("Muitas tentativas. Por segurança, aguarde 15 minutos ou peça um novo link ao seu profissional.");
+    }
     if (!data) {
       setTentativas((t) => t + 1);
       return setErro("Não encontramos. Confira a data de nascimento ou peça um novo link ao seu profissional.");
