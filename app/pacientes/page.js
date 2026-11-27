@@ -5,6 +5,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import Topo from "@/components/Topo";
 import { calcularAlertas } from "@/lib/ficha";
+import { chavePaciente, fichaPrincipal } from "@/lib/pacientes";
 
 function normalizar(s) {
   return String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
@@ -50,11 +51,26 @@ export default function Pacientes() {
       setLista([]);
       return;
     }
-    setLista(data || []);
     const { data: ev } = await supabase.from("evolucoes").select("ficha_id, data").order("data", { ascending: false }).limit(5000);
     const mapa = {};
     (ev || []).forEach((e) => { if (!mapa[e.ficha_id]) mapa[e.ficha_id] = e.data; });
     setUltimaSessao(mapa);
+    // Uma linha por paciente: junta as fichas (uma por queixa) do mesmo cadastro
+    const grupos = {};
+    (data || []).forEach((f) => { (grupos[chavePaciente(f)] ||= []).push(f); });
+    setLista(Object.values(grupos).map((fichas) => {
+      const principal = fichaPrincipal(fichas);
+      const datas = fichas.map((f) => mapa[f.id]).filter(Boolean).sort();
+      const maisNova = [...fichas].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+      return {
+        ...principal,
+        _fichas: fichas,
+        _ultima: datas[datas.length - 1] || null,
+        _nova: fichas.find((f) => f.status === "respondida" && !f.vista_em) || null,
+        _pendente: maisNova.status !== "respondida" ? maisNova : null,
+        ativo: fichas.some((f) => f.ativo !== false),
+      };
+    }));
   }
 
   useEffect(() => { carregar(); }, []);
@@ -63,15 +79,14 @@ export default function Pacientes() {
     if (!lista) return [];
     const termo = normalizar(busca.trim());
     const digitos = busca.replace(/\D/g, "");
-    const novo = (p) => p.status === "respondida" && !p.vista_em;
-    const recente = (p) => ultimaSessao[p.id] || p.respondida_em || p.created_at;
+    const novo = (p) => !!p._nova;
+    const recente = (p) => p._ultima || p.respondida_em || p.created_at;
     return lista.filter((p) => {
       if (filtro === "ativos" && p.ativo === false) return false;
       if (filtro === "inativos" && p.ativo !== false) return false;
       if (!termo) return true;
-      const r = p.respostas || {};
-      const texto = normalizar([p.paciente_nome, r.nome, r.queixa, r.local, r.profissao, r.endereco].join(" "));
-      const tel = String(p.paciente_whatsapp || r.tel || "").replace(/\D/g, "");
+      const texto = normalizar(p._fichas.map((f) => { const r = f.respostas || {}; return [f.paciente_nome, r.nome, r.queixa, r.local, r.profissao, r.endereco].join(" "); }).join(" "));
+      const tel = p._fichas.map((f) => String(f.paciente_whatsapp || f.respostas?.tel || "").replace(/\D/g, "")).join(" ");
       return texto.includes(termo) || (digitos.length >= 3 && tel.includes(digitos));
     }).sort((a, b) => {
       // Fichas novas primeiro; depois quem foi atendido mais recentemente (na pesquisa, ordem alfabética)
@@ -79,7 +94,7 @@ export default function Pacientes() {
       if (termo) return 0;
       return new Date(recente(b)) - new Date(recente(a));
     });
-  }, [lista, busca, filtro, ultimaSessao]);
+  }, [lista, busca, filtro]);
 
   const contagem = lista ? {
     ativos: lista.filter((p) => p.ativo !== false).length,
@@ -134,16 +149,17 @@ export default function Pacientes() {
                   <div className="linha" style={{ gap: 8 }}>
                     <Link href={`/painel/${p.id}`} style={{ fontWeight: 600, color: "var(--texto)" }}>{r.nome || p.paciente_nome}</Link>
                     {p.ativo === false && <span className="etiqueta etq-pend">Inativo desde {dataBR(p.inativado_em)}</span>}
-                    {p.status !== "respondida" && <span className="etiqueta etq-pend">Ficha pendente</span>}
-                    {p.status === "respondida" && !p.vista_em && <span className="etiqueta etq-ok">Nova</span>}
+                    {p._pendente && <span className="etiqueta etq-pend">Ficha pendente</span>}
+                    {p._nova && <span className="etiqueta etq-ok">Ficha nova</span>}
+                    {p._fichas.length > 1 && <span className="etiqueta etq-pend">{p._fichas.length} fichas</span>}
                     {alertas.length > 0 && <span className="etiqueta etq-alerta">{alertas.length} alerta{alertas.length > 1 ? "s" : ""}</span>}
                     {cuidados.length > 0 && <span className="etiqueta etq-cuidado">{cuidados.length} cuidado{cuidados.length > 1 ? "s" : ""}</span>}
                   </div>
-                  <div className="suave">{[ultimaSessao[p.id] ? `última sessão ${quandoFoi(ultimaSessao[p.id])}` : "nenhuma sessão ainda", r.queixa && String(r.queixa).slice(0, 70), p.paciente_whatsapp || r.tel].filter(Boolean).join(" · ")}</div>
+                  <div className="suave">{[p._ultima ? `última sessão ${quandoFoi(p._ultima)}` : "nenhuma sessão ainda", r.queixa && String(r.queixa).slice(0, 70), p.paciente_whatsapp || r.tel].filter(Boolean).join(" · ")}</div>
                 </div>
                 <div className="linha">
-                  {p.status === "respondida" && !p.vista_em
-                    ? <Link href={`/painel/${p.id}`} className="botao">Ver ficha nova</Link>
+                  {p._nova
+                    ? <Link href={`/painel/${p._nova.id}`} className="botao">Ver ficha nova</Link>
                     : <Link href={`/painel/${p.id}/evolucao`} className="botao">Registrar sessão</Link>}
                 </div>
               </div>

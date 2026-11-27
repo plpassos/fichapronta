@@ -5,11 +5,9 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import Topo from "@/components/Topo";
 import { calcularAlertas } from "@/lib/ficha";
+import { criarFicha, gerarToken } from "@/lib/pacientes";
 
-function gerarToken() {
-  const bytes = crypto.getRandomValues(new Uint8Array(12));
-  return Array.from(bytes, (b) => "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"[b % 56]).join("");
-}
+const digitos = (t) => String(t || "").replace(/\D/g, "").replace(/^55(?=\d{10,11}$)/, "");
 
 function linkWhatsApp(telefone, texto) {
   let num = (telefone || "").replace(/\D/g, "");
@@ -21,7 +19,7 @@ function quando(d) {
   return new Date(d).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
-export default function Painel() {
+export default function Painel({ searchParams }) {
   const supabase = createClient();
   const [perfil, setPerfil] = useState(null);
   const [fichas, setFichas] = useState([]);
@@ -33,40 +31,68 @@ export default function Painel() {
   const [modo, setModo] = useState("formulario");
   const [criando, setCriando] = useState(false);
   const [facil, setFacil] = useState(true); // uma pergunta por tela (padrão) ou várias
+  const [existente, setExistente] = useState(null); // paciente já cadastrado que vai ganhar uma ficha nova
+  const [duplicado, setDuplicado] = useState(null); // possível paciente repetido (mesmo WhatsApp)
+  const [todas, setTodas] = useState([]);
 
   async function carregar() {
     const { data: { user } } = await supabase.auth.getUser();
     const { data: p } = await supabase.from("profiles").select("*").eq("id", user.id).maybeSingle();
     if (!p) return (window.location.href = "/cadastro");
     setPerfil(p);
-    const { data } = await supabase.from("fichas").select("*").order("created_at", { ascending: false }).limit(100);
+    const { data } = await supabase.from("fichas").select("*").order("created_at", { ascending: false }).limit(2000);
+    setTodas(data || []);
     setFichas((data || []).filter((f) => f.ativo !== false && f.status !== "respondida"));
     setNovas((data || []).filter((f) => f.ativo !== false && f.status === "respondida" && !f.vista_em));
   }
 
   useEffect(() => { carregar(); }, []);
 
-  async function criar(e) {
-    e.preventDefault();
+  // Vindo de um paciente (?paciente=<id da ficha>): nova ficha para uma nova queixa
+  useEffect(() => {
+    const id = searchParams?.paciente;
+    if (!id) return;
+    (async () => {
+      const { data: f } = await supabase.from("fichas").select("*").eq("id", id).maybeSingle();
+      if (!f?.paciente_id) return;
+      setExistente(f);
+      setNome(f.respostas?.nome || f.paciente_nome);
+      setTel(f.paciente_whatsapp || f.respostas?.tel || "");
+    })();
+  }, [searchParams?.paciente]);
+
+  async function criar(e, escolha) {
+    e?.preventDefault?.();
     setErro("");
     const presencial = modo === "presencial";
     const dig = tel.replace(/\D/g, "").replace(/^55(?=\d{10,11}$)/, "");
     // No atendimento o WhatsApp é opcional; para enviar o link, é obrigatório
     if ((!presencial || dig) && (dig.length < 10 || dig.length > 11)) return setErro("Confira o WhatsApp: use DDD + número, por exemplo (11) 98765-4321.");
     if (nome.trim().length < 2) return setErro("Escreva o nome do paciente.");
+    let alvo = escolha === "mesmo" ? duplicado : existente;
+    // Mesmo WhatsApp de um paciente já cadastrado: perguntar antes de duplicar
+    if (!alvo && escolha !== "outro" && dig) {
+      const igual = todas.find((f) => f.paciente_id && digitos(f.paciente_whatsapp || f.respostas?.tel) === dig);
+      if (igual) return setDuplicado(igual);
+    }
+    setDuplicado(null);
     const token = gerarToken();
     setCriando(true);
-    const { data: nova, error } = await supabase.from("fichas").insert({
-      profissional_id: perfil.id, token, paciente_nome: nome.trim(), paciente_whatsapp: tel.trim(), modo: presencial ? "presencial" : facil ? "formulario" : "formulario_rapido",
-    }).select("id").single();
+    const { data: nova, error } = await criarFicha(supabase, {
+      profissionalId: perfil.id, token, nome: nome.trim(), whatsapp: tel.trim(),
+      modo: presencial ? "presencial" : facil ? "formulario" : "formulario_rapido",
+      pacienteId: alvo?.paciente_id,
+    });
     if (error) { setCriando(false); return setErro(presencial ? "Não foi possível abrir a ficha. Tente de novo." : "Não foi possível gerar o link. Tente de novo."); }
     if (presencial) return (window.location.href = `/f/${token}?p=${nova.id}`);
     setCriando(false);
     const url = `${window.location.origin}/f/${token}${facil ? "" : "?r=1"}`;
     const primeiro = nome.trim().split(" ")[0];
-    const texto = `Olá, ${primeiro}! Antes da nossa primeira sessão, preciso de algumas informações. Leva uns 8 minutos: ${url}`;
+    const texto = alvo
+      ? `Olá, ${primeiro}! Para o novo tratamento, preciso atualizar algumas informações. Leva uns 8 minutos: ${url}`
+      : `Olá, ${primeiro}! Antes da nossa primeira sessão, preciso de algumas informações. Leva uns 8 minutos: ${url}`;
     setGerado({ url, whats: linkWhatsApp(tel, texto) });
-    setNome(""); setTel("");
+    setNome(""); setTel(""); setExistente(null);
     carregar();
   }
 
@@ -77,7 +103,8 @@ export default function Painel() {
       <Topo />
       <main className="conteudo grade">
         <section className="cartao pilha">
-          <h2 style={{ margin: 0 }}>Novo paciente</h2>
+          <h2 style={{ margin: 0 }}>{existente ? `Nova ficha para ${existente.respostas?.nome || existente.paciente_nome}` : "Novo paciente"}</h2>
+          {existente && <p className="suave" style={{ margin: 0 }}>Nova queixa do mesmo paciente: a ficha fica junto com o histórico dele. <button type="button" onClick={() => { setExistente(null); setNome(""); setTel(""); }} style={{ border: 0, background: "none", color: "var(--marca)", font: "inherit", cursor: "pointer", padding: 0 }}>Cancelar</button></p>}
           <form onSubmit={criar} className="pilha">
             <div><label className="rotulo" htmlFor="pn">Nome do paciente</label><input id="pn" type="text" required value={nome} onChange={(e) => setNome(e.target.value)} /></div>
             <div><label className="rotulo" htmlFor="pt">WhatsApp do paciente{modo === "presencial" ? " (opcional)" : ""}</label><input id="pt" type="tel" placeholder="(11) 90000-0000" value={tel} onChange={(e) => setTel(e.target.value)} /></div>
@@ -96,6 +123,15 @@ export default function Painel() {
             )}
             <button className="botao" disabled={criando}>{modo === "presencial" ? (criando ? "Abrindo..." : "Começar a anamnese") : "Gerar link"}</button>
           </form>
+          {duplicado && (
+            <div className="cuidado pilha" role="alert" style={{ gap: 10 }}>
+              <div><b>Já existe um paciente com esse WhatsApp:</b> {duplicado.respostas?.nome || duplicado.paciente_nome}. É a mesma pessoa?</div>
+              <div className="linha">
+                <button type="button" className="botao" onClick={() => criar(null, "mesmo")}>Sim, nova ficha para ele</button>
+                <button type="button" className="botao sec" onClick={() => criar(null, "outro")}>Não, é outra pessoa</button>
+              </div>
+            </div>
+          )}
           {erro && <p className="erro" role="alert">{erro}</p>}
           {gerado && (
             <div className="pilha" style={{ background: "var(--marca-clara)", borderRadius: 12, padding: 14 }}>
