@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
 import Topo from "@/components/Topo";
 import AbasPaciente from "@/components/AbasPaciente";
+import { fichasDoPaciente } from "@/lib/pacientes";
 import Impressao from "@/components/Impressao";
 import TriagemPendente, { tecnicasAtuais } from "@/components/TriagemPendente";
 import { agoraLocal } from "@/lib/datas";
@@ -114,7 +115,7 @@ export default function Evolucao({ params }) {
     const { data: f } = await supabase.from("fichas").select("*").eq("id", params.id).maybeSingle();
     setFicha(f || null);
     if (!f) return;
-    const { data: ev } = await supabase.from("evolucoes").select("*").eq("ficha_id", f.id).order("data", { ascending: false });
+    const { data: ev } = await supabase.from("evolucoes").select("*").in("ficha_id", (await fichasDoPaciente(supabase, f)).map((x) => x.id)).order("data", { ascending: false });
     setEvolucoes(ev || []);
     const caminhos = (ev || []).flatMap((e) => e.fotos || []);
     if (caminhos.length) {

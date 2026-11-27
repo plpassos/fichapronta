@@ -6,6 +6,8 @@ import Topo from "@/components/Topo";
 import AbasPaciente from "@/components/AbasPaciente";
 import TriagemPendente, { tecnicasAtuais } from "@/components/TriagemPendente";
 import Impressao from "@/components/Impressao";
+import FichasDoPaciente from "@/components/FichasDoPaciente";
+import { fichasDoPaciente } from "@/lib/pacientes";
 
 const CONDUTAS = ["Encaminhado ao médico", "Liberado para atendimento após avaliação", "Orientado e em observação"];
 import { calcularAlertas, montarEtapas, formatarResposta, ROTULOS_ANTIGOS } from "@/lib/ficha";
@@ -23,6 +25,7 @@ export default function DetalheFicha({ params }) {
   const [f, setF] = useState(undefined);
   const [copiado, setCopiado] = useState(false);
   const [perfil, setPerfil] = useState(null);
+  const [grupo, setGrupo] = useState([]);
   const [conduta, setConduta] = useState({});
   const [msgConduta, setMsgConduta] = useState("");
 
@@ -43,7 +46,8 @@ export default function DetalheFicha({ params }) {
     const ativo = f.ativo === false;
     if (!ativo && !window.confirm("Inativar este paciente? A ficha e as evoluções continuam salvas e você pode reativar quando quiser.")) return;
     const inativado_em = ativo ? null : new Date().toISOString();
-    const { error } = await supabase.from("fichas").update({ ativo, inativado_em }).eq("id", f.id);
+    const ids = (grupo.length ? grupo : [f]).map((x) => x.id);
+    const { error } = await supabase.from("fichas").update({ ativo, inativado_em }).in("id", ids);
     if (!error) setF({ ...f, ativo, inativado_em });
   }
 
@@ -68,6 +72,7 @@ export default function DetalheFicha({ params }) {
       }
       const { data } = await supabase.from("fichas").select("*").eq("id", params.id).maybeSingle();
       setF(data || null);
+      if (data) setGrupo(await fichasDoPaciente(supabase, data));
       if (data && data.status === "respondida" && !data.vista_em) {
         await supabase.from("fichas").update({ vista_em: new Date().toISOString() }).eq("id", data.id);
       }
@@ -88,6 +93,7 @@ export default function DetalheFicha({ params }) {
         <main className="conteudo pilha">
           <AbasPaciente id={f.id} atual="anamnese" />
           <h1 style={{ margin: 0, fontSize: 22 }}>{f.paciente_nome}</h1>
+          <FichasDoPaciente ficha={f} grupo={grupo} onJuntou={() => window.location.reload()} />
           {avisoInativo(f)}
           <div className="cartao pilha">
             <div><span className="etiqueta etq-pend">Aguardando resposta</span> <span className="suave">enviada em {new Date(f.created_at).toLocaleDateString("pt-BR")}</span></div>
@@ -176,6 +182,7 @@ export default function DetalheFicha({ params }) {
           )}
         </div>
 
+        <FichasDoPaciente ficha={f} grupo={grupo} onJuntou={() => window.location.reload()} />
         <TriagemPendente ficha={f} tecnicas={tecnicas} onSalvo={setF} />
 
         <div className="grade">

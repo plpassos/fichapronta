@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import Topo from "@/components/Topo";
 import AbasPaciente from "@/components/AbasPaciente";
+import { fichasDoPaciente } from "@/lib/pacientes";
 import Impressao from "@/components/Impressao";
 import { lerRascunho, gravarRascunho, useAvisoSaida } from "@/lib/rascunho";
 import { agoraLocal } from "@/lib/datas";
@@ -175,7 +176,7 @@ export default function Avaliacao({ params }) {
     if (!f) return;
     const { data: p } = await supabase.from("profiles").select("testes_favoritos").eq("id", user.id).maybeSingle();
     setFavoritos(p?.testes_favoritos || []);
-    const { data: av, error } = await supabase.from("avaliacoes").select("*").eq("ficha_id", f.id).order("data", { ascending: true });
+    const { data: av, error } = await supabase.from("avaliacoes").select("*").in("ficha_id", (await fichasDoPaciente(supabase, f)).map((x) => x.id)).order("data", { ascending: true });
     if (error) setMsg("Não foi possível carregar as avaliações. Confira se o arquivo supabase/avaliacao.sql foi rodado no Supabase.");
     setAvaliacoes(av || []);
     const caminhos = (av || []).flatMap((a) => a.fotos || []);
