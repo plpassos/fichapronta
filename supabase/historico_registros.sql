@@ -83,9 +83,30 @@ create policy "avaliacoes: dono cria" on public.avaliacoes for insert with check
 create policy "avaliacoes: dono altera" on public.avaliacoes for update
   using (auth.uid() = profissional_id) with check (auth.uid() = profissional_id);
 
--- Link do paciente: sessões excluídas não aparecem
-create or replace function public.evolucao_publica(p_token text, p_nasc text)
-returns json language sql security definer set search_path = public as $$
+-- Link do paciente: sessões excluídas não aparecem, e o limite de tentativas
+-- fica no servidor (a mesma função do limite_tentativas.sql: a ordem não importa)
+create table if not exists public.tentativas_link (
+  id bigserial primary key,
+  token text not null,
+  em timestamptz not null default now()
+);
+create index if not exists tentativas_link_token_idx on public.tentativas_link (token, em);
+-- Sem políticas: ninguém lê nem grava por fora, só a função abaixo
+alter table public.tentativas_link enable row level security;
+
+drop function if exists public.evolucao_publica(text, text);
+create function public.evolucao_publica(p_token text, p_nasc text)
+returns json language plpgsql security definer set search_path = public as $$
+declare
+  resultado json;
+  falhas int;
+begin
+  select count(*) into falhas from tentativas_link
+   where token = p_token and em > now() - interval '15 minutes';
+  if falhas >= 5 then
+    return json_build_object('bloqueado', true);
+  end if;
+
   select json_build_object(
     'paciente_nome', f.paciente_nome,
     'profissional', json_build_object('nome', p.nome, 'profissao', p.profissao),
@@ -98,12 +119,18 @@ returns json language sql security definer set search_path = public as $$
         'notas', case when coalesce((f.compartilhar->>'notas')::boolean, false) then e.notas end
       ) order by e.data)
       from evolucoes e where e.ficha_id = f.id and e.excluido_em is null), '[]'::json)
-  )
+  ) into resultado
   from fichas f join profiles p on p.id = f.profissional_id
   where f.token_evolucao = p_token
     and p_nasc is not null
     and f.respostas->>'nasc' = p_nasc
     and f.ativo is not false;
-$$;
+
+  if resultado is null then
+    insert into tentativas_link (token) values (coalesce(p_token, ''));
+    delete from tentativas_link where em < now() - interval '1 day';
+  end if;
+  return resultado;
+end $$;
 revoke all on function public.evolucao_publica(text, text) from public;
 grant execute on function public.evolucao_publica(text, text) to anon, authenticated;
