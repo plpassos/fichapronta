@@ -11,11 +11,12 @@ import { lerRascunho, gravarRascunho, useAvisoSaida } from "@/lib/rascunho";
 import { agoraLocal } from "@/lib/datas";
 import { BotaoMicrofone } from "@/components/Voz";
 import { TECNICAS } from "@/lib/ficha";
+import { MODELOS } from "@/lib/modelos";
 import { ADM, FORCA, FUNCIONAIS, REGIOES_CORPO, sugerirRegioes, nomeTeste } from "@/lib/testes";
 
 // planoTecnicas, planoRegioes e planoOrientacoes já abrem preenchidos em cada nova sessão da evolução
 const CONCLUSAO_VAZIA = { diagnostico: "", prognostico: "", objCurto: "", objLongo: "", frequencia: "", sessoes: "", condutas: "", planoTecnicas: [], planoRegioes: "", planoOrientacoes: "" };
-const VAZIO = { testes: {}, adm: {}, forca: {}, func: {}, pg: [], pgObs: "", postura: "", obs: "", conclusao: CONCLUSAO_VAZIA };
+const VAZIO = { testes: {}, adm: {}, forca: {}, func: {}, pg: [], pgObs: "", postura: "", obs: "", conclusao: CONCLUSAO_VAZIA, modelo: "" };
 const CAMPOS_CONCLUSAO = [
   { id: "diagnostico", nome: "Diagnóstico cinético-funcional", area: true, ph: "Ex.: disfunção do movimento de flexão do ombro D por dor e fraqueza do manguito rotador" },
   { id: "prognostico", nome: "Prognóstico", ph: "Ex.: bom, com retorno às atividades em 8 semanas" },
@@ -35,6 +36,7 @@ function dadosParaForm(d = {}) {
     testes: d.testes || {}, adm: txt(d.adm), forca: txt(d.forca), func: txt(d.func),
     pg: d.pg || [], pgObs: d.pgObs || "", postura: d.postura || "", obs: d.obs || "",
     conclusao: { ...CONCLUSAO_VAZIA, ...(d.conclusao || {}) },
+    modelo: d.modelo || "",
   };
 }
 
@@ -80,6 +82,7 @@ function limpar(form) {
   if (form.pgObs.trim()) dados.pgObs = form.pgObs.trim();
   if (form.postura.trim()) dados.postura = form.postura.trim();
   if (form.obs.trim()) dados.obs = form.obs.trim();
+  if (form.modelo) dados.modelo = form.modelo;
   const conc = {};
   for (const [k, v] of Object.entries(form.conclusao || {})) {
     if (Array.isArray(v)) { if (v.length) conc[k] = v; }
@@ -178,6 +181,7 @@ export default function Avaliacao({ params }) {
   const [podeEditar, setPodeEditar] = useState(false); // depende do supabase/historico_registros.sql
   const [editando, setEditando] = useState(null);
   const [tecPerfil, setTecPerfil] = useState([]);
+  const [todasMedidas, setTodasMedidas] = useState(false);
 
   // Rascunho automático: uma avaliação longa não se perde ao trocar de aba ou recarregar
   useEffect(() => {
@@ -214,7 +218,34 @@ export default function Avaliacao({ params }) {
 
   useEffect(() => { carregar(); }, [params.id]);
 
-  const regioes = useMemo(() => sugerirRegioes(ficha?.respostas || {}), [ficha]);
+  const modelo = MODELOS.find((m) => m.id === form.modelo) || null;
+  const regioes = useMemo(() => {
+    const lista = sugerirRegioes(ficha?.respostas || {});
+    if (!modelo) return lista;
+    // a região do modelo vem primeiro e aberta
+    const alvo = lista.find((r) => r.id === modelo.regiao);
+    return alvo ? [{ ...alvo, sugerida: true }, ...lista.filter((r) => r.id !== modelo.regiao).map((r) => ({ ...r, sugerida: false }))] : lista;
+  }, [ficha, modelo]);
+  const filtrarModelo = (lista, chave) => (modelo && !todasMedidas ? lista.filter((i) => modelo[chave].includes(i.id)) : lista);
+
+  function aplicarModelo(m) {
+    if (form.modelo === m.id) return setForm((f) => ({ ...f, modelo: "" }));
+    setTodasMedidas(false);
+    const doPerfil = (mm) => mm.conclusao.planoTecnicas.filter((t) => !tecPerfil.length || tecPerfil.includes(t));
+    setForm((f) => {
+      const c = { ...f.conclusao };
+      const anterior = MODELOS.find((x) => x.id === f.modelo);
+      // preenche o que está vazio ou ainda igual ao modelo anterior: nada do que foi digitado é apagado
+      for (const [k, v] of Object.entries(m.conclusao)) {
+        if (k === "planoTecnicas") continue;
+        if (!String(c[k] || "").trim() || (anterior && c[k] === anterior.conclusao[k])) c[k] = v;
+      }
+      const tecAtuais = c.planoTecnicas || [];
+      if (!tecAtuais.length || (anterior && JSON.stringify(tecAtuais) === JSON.stringify(doPerfil(anterior)))) c.planoTecnicas = doPerfil(m);
+      return { ...f, modelo: m.id, conclusao: c };
+    });
+    setMsg(`Modelo "${m.nome}" aplicado: revise a conclusão e o plano antes de salvar.`);
+  }
   const anterior = avaliacoes.length ? avaliacoes[avaliacoes.length - 1].dados || {} : {};
 
   function setLado(grupo, id, lado, valor) {
@@ -348,6 +379,17 @@ export default function Avaliacao({ params }) {
             <label className="rotulo" htmlFor="quando">Data e hora da avaliação</label>
             <input id="quando" type="datetime-local" value={quando} max={agoraLocal()} onChange={(e) => setQuando(e.target.value)} style={{ maxWidth: 260 }} />
           </div>
+          {!editando && (
+            <div>
+              <div className="rotulo">Começar por um modelo <span className="suave" style={{ fontWeight: 400 }}>(opcional)</span></div>
+              <div className="chips">
+                {MODELOS.map((m) => (
+                  <label key={m.id} className="chip"><input type="checkbox" checked={form.modelo === m.id} onChange={() => aplicarModelo(m)} /><span>{m.nome}</span></label>
+                ))}
+              </div>
+              {modelo && <p className="suave" style={{ margin: "6px 0 0" }}>Mostrando só as medidas de {modelo.nome.toLowerCase()}. <button type="button" onClick={() => setTodasMedidas(!todasMedidas)} style={{ border: 0, background: "none", color: "var(--marca)", font: "inherit", fontSize: 14, cursor: "pointer", padding: 0 }}>{todasMedidas ? "Mostrar só as do modelo" : "Mostrar todas"}</button></p>}
+            </div>
+          )}
 
           <Secao titulo="Testes especiais" aberta n={Object.values(form.testes).filter((v) => v.D || v.E).length}>
             <label className="linha" style={{ cursor: "pointer", minHeight: 44 }}>
@@ -361,7 +403,7 @@ export default function Avaliacao({ params }) {
               return (
                 <details key={reg.id} open={soFavoritos || reg.sugerida || (ri === 0 && !regioes.some((x) => x.sugerida))} style={{ border: "1px solid var(--linha)", borderRadius: 12 }}>
                   <summary style={{ cursor: "pointer", padding: "12px 14px", fontWeight: 600, minHeight: 44 }}>
-                    {reg.nome}{reg.sugerida && <span className="etiqueta etq-ok" style={{ marginLeft: 8 }}>sugerida pela queixa</span>}
+                    {reg.nome}{reg.sugerida && <span className="etiqueta etq-ok" style={{ marginLeft: 8 }}>{modelo && reg.id === modelo.regiao ? "do modelo" : "sugerida pela queixa"}</span>}
                   </summary>
                   <div style={{ padding: "0 14px 8px" }}>
                     {testes.map((t, i) => {
@@ -397,8 +439,8 @@ export default function Avaliacao({ params }) {
             })}
           </Secao>
 
-          <Secao titulo="Amplitude de movimento" n={Object.values(form.adm).filter((v) => !vazio(v.D) || !vazio(v.E)).length}>
-            {ADM.map((item, i) => {
+          <Secao titulo="Amplitude de movimento" aberta={!!modelo} n={Object.values(form.adm).filter((v) => !vazio(v.D) || !vazio(v.E)).length}>
+            {filtrarModelo(ADM, "adm").map((item, i) => {
               const ant = anterior.adm?.[item.id] || {};
               return (
                 <div key={item.id} className="linha" style={{ justifyContent: "space-between", padding: "6px 0", borderTop: i ? "1px solid var(--linha)" : 0 }}>
@@ -420,8 +462,8 @@ export default function Avaliacao({ params }) {
             })}
           </Secao>
 
-          <Secao titulo="Força muscular (0 a 5)" n={Object.values(form.forca).filter((v) => !vazio(v.D) || !vazio(v.E)).length}>
-            {FORCA.map((item, i) => {
+          <Secao titulo="Força muscular (0 a 5)" aberta={!!modelo} n={Object.values(form.forca).filter((v) => !vazio(v.D) || !vazio(v.E)).length}>
+            {filtrarModelo(FORCA, "forca").map((item, i) => {
               const ant = anterior.forca?.[item.id] || {};
               return (
                 <div key={item.id} className="linha" style={{ justifyContent: "space-between", padding: "6px 0", borderTop: i ? "1px solid var(--linha)" : 0 }}>
@@ -445,8 +487,9 @@ export default function Avaliacao({ params }) {
             })}
           </Secao>
 
-          <Secao titulo="Testes funcionais" n={Object.values(form.func).filter((v) => !vazio(v.D) || !vazio(v.E)).length}>
-            {FUNCIONAIS.map((item, i) => {
+          {filtrarModelo(FUNCIONAIS, "funcionais").length > 0 && (
+          <Secao titulo="Testes funcionais" aberta={!!modelo && (modelo.funcionais.length > 0)} n={Object.values(form.func).filter((v) => !vazio(v.D) || !vazio(v.E)).length}>
+            {filtrarModelo(FUNCIONAIS, "funcionais").map((item, i) => {
               const ant = anterior.func?.[item.id] || {};
               return (
                 <div key={item.id} className="linha" style={{ justifyContent: "space-between", padding: "6px 0", borderTop: i ? "1px solid var(--linha)" : 0 }}>
@@ -467,6 +510,7 @@ export default function Avaliacao({ params }) {
               );
             })}
           </Secao>
+          )}
 
           <Secao titulo="Palpação e postura" n={form.pg.length + (form.pgObs.trim() ? 1 : 0) + (form.postura.trim() ? 1 : 0) + arquivos.length}>
             {anterior.pg?.length > 0 && <p className="suave" style={{ margin: 0 }}>Antes: {anterior.pg.join(", ")}</p>}
