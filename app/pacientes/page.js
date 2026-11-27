@@ -12,6 +12,15 @@ function normalizar(s) {
 function dataBR(d) {
   return d ? new Date(d).toLocaleDateString("pt-BR") : "—";
 }
+function quandoFoi(d) {
+  if (!d) return "";
+  const dia = (x) => { const t = new Date(x); return new Date(t.getFullYear(), t.getMonth(), t.getDate()); };
+  const dias = Math.round((dia(Date.now()) - dia(d)) / 86400000);
+  if (dias <= 0) return "hoje";
+  if (dias === 1) return "ontem";
+  if (dias < 7) return `há ${dias} dias`;
+  return new Date(d).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+}
 
 const FILTROS = [
   { id: "ativos", nome: "Ativos" },
@@ -25,8 +34,12 @@ export default function Pacientes() {
   const [busca, setBusca] = useState("");
   const [filtro, setFiltro] = useState("ativos");
   const [msg, setMsg] = useState("");
+  const [ultimaSessao, setUltimaSessao] = useState({});
 
   async function carregar() {
+    const { data: { user } } = await supabase.auth.getUser();
+    const { data: perfil } = await supabase.from("profiles").select("id").eq("id", user.id).maybeSingle();
+    if (!perfil) return (window.location.href = "/cadastro");
     const { data, error } = await supabase
       .from("fichas")
       .select("*")
@@ -38,26 +51,20 @@ export default function Pacientes() {
       return;
     }
     setLista(data || []);
+    const { data: ev } = await supabase.from("evolucoes").select("ficha_id, data").order("data", { ascending: false }).limit(5000);
+    const mapa = {};
+    (ev || []).forEach((e) => { if (!mapa[e.ficha_id]) mapa[e.ficha_id] = e.data; });
+    setUltimaSessao(mapa);
   }
 
   useEffect(() => { carregar(); }, []);
-
-  async function alternarAtivo(p) {
-    const ativo = !p.ativo;
-    if (!ativo && !window.confirm(`Inativar ${p.paciente_nome}? A ficha e as evoluções continuam salvas e você pode reativar quando quiser.`)) return;
-    const { error } = await supabase
-      .from("fichas")
-      .update({ ativo, inativado_em: ativo ? null : new Date().toISOString() })
-      .eq("id", p.id);
-    if (error) return setMsg("Não foi possível alterar o paciente.");
-    setMsg(ativo ? `${p.paciente_nome} foi reativado.` : `${p.paciente_nome} foi inativado.`);
-    setLista((l) => l.map((x) => (x.id === p.id ? { ...x, ativo, inativado_em: ativo ? null : new Date().toISOString() } : x)));
-  }
 
   const resultado = useMemo(() => {
     if (!lista) return [];
     const termo = normalizar(busca.trim());
     const digitos = busca.replace(/\D/g, "");
+    const novo = (p) => p.status === "respondida" && !p.vista_em;
+    const recente = (p) => ultimaSessao[p.id] || p.respondida_em || p.created_at;
     return lista.filter((p) => {
       if (filtro === "ativos" && p.ativo === false) return false;
       if (filtro === "inativos" && p.ativo !== false) return false;
@@ -66,8 +73,13 @@ export default function Pacientes() {
       const texto = normalizar([p.paciente_nome, r.nome, r.queixa, r.local, r.profissao, r.endereco].join(" "));
       const tel = String(p.paciente_whatsapp || r.tel || "").replace(/\D/g, "");
       return texto.includes(termo) || (digitos.length >= 3 && tel.includes(digitos));
+    }).sort((a, b) => {
+      // Fichas novas primeiro; depois quem foi atendido mais recentemente (na pesquisa, ordem alfabética)
+      if (novo(a) !== novo(b)) return novo(a) ? -1 : 1;
+      if (termo) return 0;
+      return new Date(recente(b)) - new Date(recente(a));
     });
-  }, [lista, busca, filtro]);
+  }, [lista, busca, filtro, ultimaSessao]);
 
   const contagem = lista ? {
     ativos: lista.filter((p) => p.ativo !== false).length,
@@ -79,7 +91,10 @@ export default function Pacientes() {
     <>
       <Topo />
       <main className="conteudo pilha">
-        <h1 style={{ margin: 0, fontSize: 24 }}>Pacientes</h1>
+        <div className="linha" style={{ justifyContent: "space-between" }}>
+          <h1 style={{ margin: 0, fontSize: 24 }}>Pacientes</h1>
+          <Link href="/painel" className="botao">+ Novo paciente</Link>
+        </div>
 
         <div className="cartao pilha">
           <div>
@@ -101,7 +116,13 @@ export default function Pacientes() {
 
         <section className="cartao" aria-live="polite">
           {lista === undefined && <p className="suave">Carregando...</p>}
-          {lista && !resultado.length && (
+          {lista && lista.length === 0 && (
+            <div className="pilha" style={{ alignItems: "flex-start" }}>
+              <p className="suave" style={{ margin: 0 }}>Você ainda não tem pacientes. Comece enviando a ficha de anamnese para o primeiro.</p>
+              <Link href="/painel" className="botao">Enviar ficha para um paciente</Link>
+            </div>
+          )}
+          {lista && lista.length > 0 && !resultado.length && (
             <p className="suave">{busca ? "Nenhum paciente encontrado para essa pesquisa." : filtro === "inativos" ? "Nenhum paciente inativo." : "Nenhum paciente ainda."}</p>
           )}
           {resultado.map((p, i) => {
@@ -118,12 +139,12 @@ export default function Pacientes() {
                     {alertas.length > 0 && <span className="etiqueta etq-alerta">{alertas.length} alerta{alertas.length > 1 ? "s" : ""}</span>}
                     {cuidados.length > 0 && <span className="etiqueta etq-cuidado">{cuidados.length} cuidado{cuidados.length > 1 ? "s" : ""}</span>}
                   </div>
-                  <div className="suave">{[r.queixa && String(r.queixa).slice(0, 70), p.paciente_whatsapp || r.tel, `desde ${dataBR(p.created_at)}`].filter(Boolean).join(" · ")}</div>
+                  <div className="suave">{[ultimaSessao[p.id] ? `última sessão ${quandoFoi(ultimaSessao[p.id])}` : "nenhuma sessão ainda", r.queixa && String(r.queixa).slice(0, 70), p.paciente_whatsapp || r.tel].filter(Boolean).join(" · ")}</div>
                 </div>
                 <div className="linha">
-                  <Link href={`/painel/${p.id}/avaliacao`} className="botao sec">Avaliação</Link>
-                  <Link href={`/painel/${p.id}/evolucao`} className="botao sec">Evolução</Link>
-                  <button type="button" className="botao sec" onClick={() => alternarAtivo(p)}>{p.ativo === false ? "Reativar" : "Inativar"}</button>
+                  {p.status === "respondida" && !p.vista_em
+                    ? <Link href={`/painel/${p.id}`} className="botao">Ver ficha nova</Link>
+                    : <Link href={`/painel/${p.id}/evolucao`} className="botao">Registrar sessão</Link>}
                 </div>
               </div>
             );

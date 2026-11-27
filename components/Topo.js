@@ -13,12 +13,15 @@ export default function Topo() {
     router.replace("/login");
   }
 
+  // As telas de um paciente (/painel/<id>/...) pertencem à aba Pacientes
+  const emPacientes = path.startsWith("/pacientes") || (path.startsWith("/painel/") && path !== "/painel/");
+
   return (
     <header className="topo">
-      <Link href="/painel" className="logo">FichaPronta</Link>
+      <Link href="/pacientes" className="logo">FichaPronta</Link>
       <nav className="nav" aria-label="Principal">
-        <Link href="/painel" className={path.startsWith("/painel") ? "ativo" : ""}>Adicionar novo paciente</Link>
-        <Link href="/pacientes" className={path.startsWith("/pacientes") ? "ativo" : ""}>Pacientes</Link>
+        <Link href="/pacientes" className={emPacientes ? "ativo" : ""}>Pacientes</Link>
+        <Link href="/painel" className={path === "/painel" ? "ativo" : ""}>+ Novo paciente</Link>
         <Link href="/configurar" className={path.startsWith("/configurar") ? "ativo" : ""}>Minha ficha</Link>
         <Link href="/cadastro" className={path.startsWith("/cadastro") ? "ativo" : ""}>Perfil</Link>
         <button type="button" onClick={sair}>Sair</button>

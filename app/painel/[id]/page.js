@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import Topo from "@/components/Topo";
+import AbasPaciente from "@/components/AbasPaciente";
 import { calcularAlertas, montarEtapas, formatarResposta, ROTULOS_ANTIGOS } from "@/lib/ficha";
 
 function idade(nasc) {
@@ -16,6 +17,7 @@ function idade(nasc) {
 export default function DetalheFicha({ params }) {
   const supabase = createClient();
   const [f, setF] = useState(undefined);
+  const [copiado, setCopiado] = useState(false);
 
   async function alternarAtivo() {
     const ativo = f.ativo === false;
@@ -46,14 +48,27 @@ export default function DetalheFicha({ params }) {
   if (!f) return <><Topo /><main className="conteudo">Ficha não encontrada.</main></>;
 
   if (f.status !== "respondida") {
+    const url = typeof window !== "undefined" ? `${window.location.origin}/f/${f.token}` : "";
+    let tel = (f.paciente_whatsapp || "").replace(/\D/g, "");
+    if (tel && !tel.startsWith("55")) tel = "55" + tel;
+    const whats = `https://wa.me/${tel}?text=${encodeURIComponent(`Olá, ${f.paciente_nome.split(" ")[0]}! Lembrete: antes da nossa sessão, preciso que você preencha esta ficha. Leva uns 8 minutos: ${url}`)}`;
     return (
       <>
         <Topo />
         <main className="conteudo pilha">
+          <AbasPaciente id={f.id} atual="anamnese" />
           <h1 style={{ margin: 0, fontSize: 22 }}>{f.paciente_nome}</h1>
           {avisoInativo(f)}
-          <div className="linha"><a href={`/painel/${f.id}/avaliacao`} className="botao sec">Avaliação física</a><a href={`/painel/${f.id}/evolucao`} className="botao">Evolução</a>{botaoAtivo(f)}</div>
-          <div className="cartao">O paciente ainda não respondeu. Link: <span style={{ wordBreak: "break-all" }}>{typeof window !== "undefined" ? `${window.location.origin}/f/${f.token}` : ""}</span></div>
+          <div className="cartao pilha">
+            <div><span className="etiqueta etq-pend">Aguardando resposta</span> <span className="suave">enviada em {new Date(f.created_at).toLocaleDateString("pt-BR")}</span></div>
+            <p style={{ margin: 0 }}>O paciente ainda não respondeu a ficha. Você pode mandar um lembrete:</p>
+            <div className="linha">
+              {tel && <a className="botao" href={whats} target="_blank" rel="noreferrer">Reenviar pelo WhatsApp</a>}
+              <button type="button" className="botao sec" onClick={() => { navigator.clipboard.writeText(url); setCopiado(true); }}>{copiado ? "Link copiado!" : "Copiar link"}</button>
+            </div>
+            <div className="suave" style={{ wordBreak: "break-all" }}>{url}</div>
+          </div>
+          <div className="linha">{botaoAtivo(f)}</div>
         </main>
       </>
     );
@@ -69,6 +84,7 @@ export default function DetalheFicha({ params }) {
     <>
       <Topo />
       <main className="conteudo pilha">
+        <AbasPaciente id={f.id} atual="anamnese" />
         {avisoInativo(f)}
         <div className="linha" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
           <div>
@@ -77,8 +93,7 @@ export default function DetalheFicha({ params }) {
           </div>
           <div className="linha nao-imprimir">
             <button type="button" className="botao sec" onClick={() => window.print()}>Imprimir / salvar PDF</button>
-            <a href={`/painel/${f.id}/avaliacao`} className="botao sec">Avaliação física</a>
-            <a href={`/painel/${f.id}/evolucao`} className="botao">Evolução</a>
+            <a href={`/painel/${f.id}/evolucao`} className="botao">Registrar sessão</a>
             {botaoAtivo(f)}
           </div>
         </div>

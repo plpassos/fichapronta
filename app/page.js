@@ -12,6 +12,6 @@ export default async function Inicio() {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (user) redirect("/painel");
+  if (user) redirect("/pacientes");
   return <div style={{ fontFamily: "Inter, system-ui, sans-serif", background: "#fff", color: "#10292B" }} dangerouslySetInnerHTML={{ __html: landingHTML }} />;
 }
