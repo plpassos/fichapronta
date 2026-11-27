@@ -6,6 +6,7 @@ import Topo from "@/components/Topo";
 import AbasPaciente from "@/components/AbasPaciente";
 import { fichasDoPaciente } from "@/lib/pacientes";
 import Impressao from "@/components/Impressao";
+import HistoricoRegistro from "@/components/HistoricoRegistro";
 import { lerRascunho, gravarRascunho, useAvisoSaida } from "@/lib/rascunho";
 import { agoraLocal } from "@/lib/datas";
 import { BotaoMicrofone } from "@/components/Voz";
@@ -23,6 +24,17 @@ const CAMPOS_CONCLUSAO = [
   { id: "condutas", nome: "Condutas planejadas", area: true, ph: "Ex.: liberação miofascial, exercícios de estabilização, orientações posturais" },
 ];
 const chaveRascunho = (id) => `fp-rascunho-avaliacao-${id}`;
+
+// Dados salvos -> formulário (para corrigir uma avaliação)
+function dadosParaForm(d = {}) {
+  const txt = (obj) => Object.fromEntries(Object.entries(obj || {}).map(([k, v]) => [k, Object.fromEntries(Object.entries(v || {}).map(([l, x]) => [l, String(x)]))]));
+  return {
+    ...VAZIO,
+    testes: d.testes || {}, adm: txt(d.adm), forca: txt(d.forca), func: txt(d.func),
+    pg: d.pg || [], pgObs: d.pgObs || "", postura: d.postura || "", obs: d.obs || "",
+    conclusao: { ...CONCLUSAO_VAZIA, ...(d.conclusao || {}) },
+  };
+}
 
 function dataBR(d) {
   return new Date(d).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
@@ -157,6 +169,9 @@ export default function Avaliacao({ params }) {
   const [quando, setQuando] = useState(() => agoraLocal());
   const [rascunhoPronto, setRascunhoPronto] = useState(false);
   const [recuperado, setRecuperado] = useState(false);
+  const [excluidas, setExcluidas] = useState([]);
+  const [podeEditar, setPodeEditar] = useState(false); // depende do supabase/historico_registros.sql
+  const [editando, setEditando] = useState(null);
 
   // Rascunho automático: uma avaliação longa não se perde ao trocar de aba ou recarregar
   useEffect(() => {
@@ -164,7 +179,7 @@ export default function Avaliacao({ params }) {
     if (r) { setForm({ ...r, conclusao: { ...CONCLUSAO_VAZIA, ...(r.conclusao || {}) } }); setRecuperado(true); }
     setRascunhoPronto(true);
   }, [params.id]);
-  useEffect(() => { if (rascunhoPronto) gravarRascunho(chaveRascunho(params.id), form, VAZIO); }, [form, rascunhoPronto, params.id]);
+  useEffect(() => { if (rascunhoPronto && !editando) gravarRascunho(chaveRascunho(params.id), form, VAZIO); }, [form, rascunhoPronto, params.id, editando]);
   useAvisoSaida(JSON.stringify(form) !== JSON.stringify(VAZIO) || arquivos.length > 0);
 
   async function carregar() {
@@ -178,7 +193,9 @@ export default function Avaliacao({ params }) {
     setFavoritos(p?.testes_favoritos || []);
     const { data: av, error } = await supabase.from("avaliacoes").select("*").in("ficha_id", (await fichasDoPaciente(supabase, f)).map((x) => x.id)).order("data", { ascending: true });
     if (error) setMsg("Não foi possível carregar as avaliações. Confira se o arquivo supabase/avaliacao.sql foi rodado no Supabase.");
-    setAvaliacoes(av || []);
+    setAvaliacoes((av || []).filter((a) => !a.excluido_em));
+    setExcluidas((av || []).filter((a) => a.excluido_em));
+    setPodeEditar(!!av?.length && "excluido_em" in av[0]);
     const caminhos = (av || []).flatMap((a) => a.fotos || []);
     if (caminhos.length) {
       const { data: assinadas } = await supabase.storage.from("fotos").createSignedUrls(caminhos, 3600);
@@ -215,6 +232,30 @@ export default function Avaliacao({ params }) {
     if (error) setMsg("Não foi possível salvar o favorito. Confira se o arquivo supabase/avaliacao.sql foi rodado no Supabase.");
   }
 
+  function iniciarEdicao(a) {
+    const sujo = JSON.stringify(form) !== JSON.stringify(VAZIO);
+    if (sujo && !editando && !window.confirm("Você tem uma avaliação nova não salva. Ela continua guardada no rascunho. Corrigir a avaliação antiga agora?")) return;
+    setEditando(a);
+    setForm(dadosParaForm(a.dados));
+    setQuando(agoraLocal(new Date(a.data)));
+    setArquivos([]); setMsg(""); setRecuperado(false);
+    setTimeout(() => document.getElementById("form-avaliacao")?.scrollIntoView({ behavior: "smooth" }), 30);
+  }
+  function cancelarEdicao() {
+    setEditando(null); setMsg(""); setQuando(agoraLocal());
+    setForm(lerRascunho(chaveRascunho(params.id), VAZIO) || VAZIO);
+  }
+  async function excluir(a) {
+    const motivo = window.prompt(`Excluir a avaliação de ${dataBR(a.data)}?\n\nEla sai da lista, mas fica guardada no histórico. Escreva o motivo (obrigatório):`);
+    if (motivo === null) return;
+    if (!motivo.trim()) return setMsg("Para excluir, é preciso informar o motivo.");
+    const { error } = await supabase.from("avaliacoes").update({ excluido_em: new Date().toISOString(), excluido_motivo: motivo.trim() }).eq("id", a.id);
+    if (error) return setMsg("Não foi possível excluir a avaliação.");
+    if (editando?.id === a.id) cancelarEdicao();
+    setMsg("Avaliação excluída. Ela continua no histórico, com o motivo.");
+    carregar();
+  }
+
   async function salvar(e) {
     e.preventDefault();
     setMsg("");
@@ -232,6 +273,15 @@ export default function Avaliacao({ params }) {
       const { error } = await supabase.storage.from("fotos").upload(caminho, arq, { contentType: arq.type });
       if (error) { setSalvando(false); return setMsg("Não foi possível enviar uma das fotos. Tente de novo."); }
       fotos.push(caminho);
+    }
+    if (editando) {
+      const { error } = await supabase.from("avaliacoes").update({ data: dataAval.toISOString(), dados, fotos: [...(editando.fotos || []), ...fotos] }).eq("id", editando.id);
+      setSalvando(false);
+      if (error) return setMsg("Não foi possível salvar a correção.");
+      setEditando(null); setArquivos([]); setQuando(agoraLocal());
+      setForm(lerRascunho(chaveRascunho(ficha.id), VAZIO) || VAZIO);
+      setMsg("Correção salva. A versão anterior ficou no histórico.");
+      return carregar();
     }
     const { error } = await supabase.from("avaliacoes").insert({ ficha_id: ficha.id, profissional_id: userId, data: dataAval.toISOString(), dados, fotos });
     setSalvando(false);
@@ -278,11 +328,14 @@ export default function Avaliacao({ params }) {
           </section>
         )}
 
-        <form onSubmit={salvar} className="pilha nao-imprimir">
+        <form id="form-avaliacao" onSubmit={salvar} className="pilha nao-imprimir">
           <div className="linha" style={{ justifyContent: "space-between" }}>
-            <h2 style={{ margin: 0, fontSize: 20 }}>{reavaliacao ? "Reavaliação" : "Nova avaliação"}</h2>
-            {reavaliacao && <span className="suave" style={{ fontSize: 13 }}>"antes" = {dataCurta(ultima.data)}</span>}
+            <h2 style={{ margin: 0, fontSize: 20 }}>{editando ? `Corrigir avaliação de ${dataBR(editando.data)}` : reavaliacao ? "Reavaliação" : "Nova avaliação"}</h2>
+            {editando
+              ? <button type="button" className="botao sec" onClick={cancelarEdicao}>Cancelar correção</button>
+              : reavaliacao && <span className="suave" style={{ fontSize: 13 }}>"antes" = {dataCurta(ultima.data)}</span>}
           </div>
+          {editando && <p role="status" className="cuidado" style={{ margin: 0, padding: "8px 12px" }}>Você está corrigindo uma avaliação já salva. A versão anterior fica guardada no histórico.</p>}
           {recuperado && <p role="status" className="suave" style={{ margin: 0 }}>Recuperamos a avaliação que você estava preenchendo.</p>}
           <div>
             <label className="rotulo" htmlFor="quando">Data e hora da avaliação</label>
@@ -467,7 +520,7 @@ export default function Avaliacao({ params }) {
           </Secao>
 
           {msg && <p role="status" style={{ margin: 0 }}>{msg}</p>}
-          <button className="botao" disabled={salvando}>{salvando ? "Salvando..." : reavaliacao ? "Salvar reavaliação" : "Salvar avaliação"}</button>
+          <button className="botao" disabled={salvando}>{salvando ? "Salvando..." : editando ? "Salvar correção" : reavaliacao ? "Salvar reavaliação" : "Salvar avaliação"}</button>
         </form>
 
         <section className="cartao">
@@ -499,10 +552,28 @@ export default function Avaliacao({ params }) {
                     {a.fotos.map((p) => urls[p] ? <a key={p} href={urls[p]} target="_blank" rel="noreferrer"><img src={urls[p]} alt={`Foto da avaliação de ${dataBR(a.data)}`} style={{ width: 80, height: 80, objectFit: "cover", borderRadius: 8 }} /></a> : null)}
                   </div>
                 )}
+                <HistoricoRegistro registro={a} resumo={(x) => { const dd = x.dados || {}; return [x.data && dataBR(x.data), `${contarMedidas(dd)} medida(s)`, positivos(dd).length && `positivos: ${positivos(dd).join(", ")}`, dd.conclusao?.diagnostico && `diagnóstico: ${dd.conclusao.diagnostico}`, dd.obs].filter(Boolean).join(" · "); }} />
+                {podeEditar && (
+                  <div className="linha nao-imprimir" style={{ marginTop: 8, gap: 8 }}>
+                    <button type="button" className="botao sec" style={{ minHeight: 40 }} onClick={() => iniciarEdicao(a)}>Editar</button>
+                    <button type="button" className="botao sec" style={{ minHeight: 40, color: "var(--alerta)" }} onClick={() => excluir(a)}>Excluir</button>
+                  </div>
+                )}
                 </div>
               </details>
             );
           })}
+          {!podeEditar && avaliacoes.length > 0 && <p className="suave nao-imprimir" style={{ margin: "8px 0 0", fontSize: 13 }}>Para editar ou excluir avaliações, rode o arquivo supabase/historico_registros.sql no Supabase.</p>}
+          {excluidas.length > 0 && (
+            <details className="nao-imprimir" style={{ borderTop: "1px solid var(--linha)", marginTop: 8 }}>
+              <summary className="suave" style={{ cursor: "pointer", minHeight: 44, display: "flex", alignItems: "center" }}>Avaliações excluídas ({excluidas.length})</summary>
+              {excluidas.map((a) => (
+                <div key={a.id} className="suave" style={{ fontSize: 14, padding: "4px 0" }}>
+                  <s>{dataBR(a.data)} · {contarMedidas(a.dados)} medida(s)</s> — excluída em {dataBR(a.excluido_em)}. Motivo: {a.excluido_motivo}
+                </div>
+              ))}
+            </details>
+          )}
         </section>
         <p className="suave nao-imprimir" style={{ margin: 0, fontSize: 13, textAlign: "center" }}>Os testes são sugestões e não substituem o raciocínio clínico.</p>
         </Impressao>

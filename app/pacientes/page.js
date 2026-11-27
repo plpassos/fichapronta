@@ -51,7 +51,9 @@ export default function Pacientes() {
       setLista([]);
       return;
     }
-    const { data: ev } = await supabase.from("evolucoes").select("ficha_id, data").order("data", { ascending: false }).limit(5000);
+    let { data: ev, error: erroEv } = await supabase.from("evolucoes").select("ficha_id, data, excluido_em").order("data", { ascending: false }).limit(5000);
+    if (erroEv) ({ data: ev } = await supabase.from("evolucoes").select("ficha_id, data").order("data", { ascending: false }).limit(5000));
+    ev = (ev || []).filter((e) => !e.excluido_em);
     const mapa = {};
     (ev || []).forEach((e) => { if (!mapa[e.ficha_id]) mapa[e.ficha_id] = e.data; });
     setUltimaSessao(mapa);

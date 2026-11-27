@@ -7,6 +7,7 @@ import Topo from "@/components/Topo";
 import AbasPaciente from "@/components/AbasPaciente";
 import { fichasDoPaciente } from "@/lib/pacientes";
 import Impressao from "@/components/Impressao";
+import HistoricoRegistro from "@/components/HistoricoRegistro";
 import TriagemPendente, { tecnicasAtuais } from "@/components/TriagemPendente";
 import { agoraLocal } from "@/lib/datas";
 import { lerRascunho as lerR, gravarRascunho as gravarR, useAvisoSaida } from "@/lib/rascunho";
@@ -84,6 +85,9 @@ export default function Evolucao({ params }) {
   const supabase = createClient();
   const [ficha, setFicha] = useState(undefined);
   const [evolucoes, setEvolucoes] = useState([]);
+  const [excluidas, setExcluidas] = useState([]);
+  const [podeEditar, setPodeEditar] = useState(false); // depende do supabase/historico_registros.sql
+  const [editando, setEditando] = useState(null); // sessão sendo corrigida
   const [urls, setUrls] = useState({});
   const [form, setForm] = useState(VAZIO);
   const [arquivos, setArquivos] = useState([]);
@@ -116,7 +120,9 @@ export default function Evolucao({ params }) {
     setFicha(f || null);
     if (!f) return;
     const { data: ev } = await supabase.from("evolucoes").select("*").in("ficha_id", (await fichasDoPaciente(supabase, f)).map((x) => x.id)).order("data", { ascending: false });
-    setEvolucoes(ev || []);
+    setEvolucoes((ev || []).filter((e) => !e.excluido_em));
+    setExcluidas((ev || []).filter((e) => e.excluido_em));
+    setPodeEditar(!!ev?.length && "excluido_em" in ev[0]);
     const caminhos = (ev || []).flatMap((e) => e.fotos || []);
     if (caminhos.length) {
       const { data: assinadas } = await supabase.storage.from("fotos").createSignedUrls(caminhos, 3600);
@@ -133,7 +139,8 @@ export default function Evolucao({ params }) {
     if (r) { setForm(r); setAviso("Recuperamos o que você estava escrevendo nesta sessão."); }
     setRascunhoPronto(true);
   }, [params.id]);
-  useEffect(() => { if (rascunhoPronto) gravarR(chaveRascunho(params.id), form, VAZIO); }, [form, rascunhoPronto, params.id]);
+  // A correção de uma sessão antiga não vai para o rascunho de sessão nova
+  useEffect(() => { if (rascunhoPronto && !editando) gravarR(chaveRascunho(params.id), form, VAZIO); }, [form, rascunhoPronto, params.id, editando]);
   useAvisoSaida(JSON.stringify(form) !== JSON.stringify(VAZIO) || arquivos.length > 0);
 
   function anexar(k, texto) {
@@ -189,6 +196,35 @@ export default function Evolucao({ params }) {
     setForm((f) => ({ ...f, tecnicas: f.tecnicas.includes(id) ? f.tecnicas.filter((t) => t !== id) : [...f.tecnicas, id] }));
   }
 
+  function iniciarEdicao(ev) {
+    const sujo = JSON.stringify(form) !== JSON.stringify(VAZIO);
+    if (sujo && !editando && !window.confirm("Você tem uma sessão nova não salva. Ela continua guardada no rascunho. Corrigir a sessão antiga agora?")) return;
+    setEditando(ev);
+    setForm({
+      dor_antes: ev.dor_antes ?? "", dor_depois: ev.dor_depois ?? "",
+      sinais: ev.sinais || {}, tecnicas: ev.tecnicas || [],
+      regioes: ev.regioes || "", notas: ev.notas || "", orientacoes: ev.orientacoes || "",
+    });
+    setQuando(agoraLocal(new Date(ev.data)));
+    setArquivos([]); setMsg(""); setSalvou(false);
+    setAviso(`Corrigindo a sessão de ${dataBR(ev.data)}. A versão anterior fica guardada no histórico.`);
+    setTimeout(() => document.getElementById("form-sessao")?.scrollIntoView({ behavior: "smooth" }), 30);
+  }
+  function cancelarEdicao() {
+    setEditando(null); setAviso(""); setMsg(""); setQuando(agoraLocal());
+    setForm(lerR(chaveRascunho(params.id), VAZIO) || VAZIO);
+  }
+  async function excluir(ev) {
+    const motivo = window.prompt(`Excluir a sessão de ${dataBR(ev.data)}?\n\nEla sai da lista, mas fica guardada no histórico. Escreva o motivo (obrigatório):`);
+    if (motivo === null) return;
+    if (!motivo.trim()) return setMsg("Para excluir, é preciso informar o motivo.");
+    const { error } = await supabase.from("evolucoes").update({ excluido_em: new Date().toISOString(), excluido_motivo: motivo.trim() }).eq("id", ev.id);
+    if (error) return setMsg("Não foi possível excluir a sessão.");
+    if (editando?.id === ev.id) cancelarEdicao();
+    setMsg("Sessão excluída. Ela continua no histórico, com o motivo.");
+    carregar();
+  }
+
   async function salvar(e) {
     e.preventDefault();
     setMsg(""); setSalvou(false);
@@ -212,9 +248,7 @@ export default function Evolucao({ params }) {
       fotos.push(caminho);
     }
     const sinais = Object.fromEntries(Object.entries(form.sinais).filter(([, v]) => String(v).trim()));
-    const { error } = await supabase.from("evolucoes").insert({
-      ficha_id: ficha.id,
-      profissional_id: userId,
+    const campos = {
       data: dataSessao.toISOString(),
       dor_antes: numOuNulo(form.dor_antes),
       dor_depois: numOuNulo(form.dor_depois),
@@ -223,8 +257,17 @@ export default function Evolucao({ params }) {
       regioes: form.regioes.trim() || null,
       notas: form.notas.trim() || null,
       orientacoes: form.orientacoes.trim() || null,
-      fotos,
-    });
+    };
+    if (editando) {
+      const { error } = await supabase.from("evolucoes").update({ ...campos, fotos: [...(editando.fotos || []), ...fotos] }).eq("id", editando.id);
+      setSalvando(false);
+      if (error) return setMsg("Não foi possível salvar a correção.");
+      setEditando(null); setArquivos([]); setAviso(""); setQuando(agoraLocal());
+      setForm(lerR(chaveRascunho(ficha.id), VAZIO) || VAZIO);
+      setMsg("Correção salva. A versão anterior ficou no histórico.");
+      return carregar();
+    }
+    const { error } = await supabase.from("evolucoes").insert({ ficha_id: ficha.id, profissional_id: userId, ...campos, fotos });
     setSalvando(false);
     if (error) return setMsg("Não foi possível salvar a evolução.");
     setForm(VAZIO); setArquivos([]); setAutorizou(false); setAviso(""); setQuando(agoraLocal());
@@ -302,10 +345,12 @@ export default function Evolucao({ params }) {
         <TriagemPendente ficha={ficha} tecnicas={tecAtuais} onSalvo={setFicha} />
 
         <div className="grade">
-          <form onSubmit={salvar} className="cartao pilha nao-imprimir">
+          <form id="form-sessao" onSubmit={salvar} className="cartao pilha nao-imprimir" style={editando ? { borderColor: "var(--cuidado)", boxShadow: "0 0 0 1px var(--cuidado)" } : undefined}>
             <div className="linha" style={{ justifyContent: "space-between" }}>
-              <h2 style={{ margin: 0 }}>Nova sessão</h2>
-              {evolucoes.length > 0 && <button type="button" className="botao sec" onClick={repetirUltima}>Repetir última sessão</button>}
+              <h2 style={{ margin: 0 }}>{editando ? "Corrigir sessão" : "Nova sessão"}</h2>
+              {editando
+                ? <button type="button" className="botao sec" onClick={cancelarEdicao}>Cancelar correção</button>
+                : evolucoes.length > 0 && <button type="button" className="botao sec" onClick={repetirUltima}>Repetir última sessão</button>}
             </div>
             {aviso && <p role="status" className="suave" style={{ margin: 0 }}>{aviso}</p>}
             <div>
@@ -362,7 +407,7 @@ export default function Evolucao({ params }) {
                 {salvou && <Link href="/pacientes" className="botao sec">Próximo paciente →</Link>}
               </div>
             )}
-            <button className="botao" disabled={salvando}>{salvando ? "Salvando..." : "Salvar evolução"}</button>
+            <button className="botao" disabled={salvando}>{salvando ? "Salvando..." : editando ? "Salvar correção" : "Salvar evolução"}</button>
           </form>
 
           <section className="pilha" style={{ minWidth: 0 }}>
@@ -403,9 +448,27 @@ export default function Evolucao({ params }) {
                         {e.fotos.map((p) => urls[p] ? <a key={p} href={urls[p]} target="_blank" rel="noreferrer"><img src={urls[p]} alt={`Foto da sessão de ${dataBR(e.data)}`} style={{ width: 80, height: 80, objectFit: "cover", borderRadius: 8 }} /></a> : null)}
                       </div>
                     )}
+                    <HistoricoRegistro registro={e} resumo={(a) => [a.data && dataBR(a.data), (a.dor_antes !== null || a.dor_depois !== null) && `dor ${a.dor_antes ?? "—"}→${a.dor_depois ?? "—"}`, a.notas, a.orientacoes && `Para casa: ${a.orientacoes}`].filter(Boolean).join(" · ") || "sem texto"} />
+                    {podeEditar && (
+                      <div className="linha nao-imprimir" style={{ marginTop: 8, gap: 8 }}>
+                        <button type="button" className="botao sec" style={{ minHeight: 40 }} onClick={() => iniciarEdicao(e)}>Editar</button>
+                        <button type="button" className="botao sec" style={{ minHeight: 40, color: "var(--alerta)" }} onClick={() => excluir(e)}>Excluir</button>
+                      </div>
+                    )}
                   </div>
                 </details>
               ))}
+              {!podeEditar && evolucoes.length > 0 && <p className="suave nao-imprimir" style={{ margin: "8px 0 0", fontSize: 13 }}>Para editar ou excluir sessões, rode o arquivo supabase/historico_registros.sql no Supabase.</p>}
+              {excluidas.length > 0 && (
+                <details className="nao-imprimir" style={{ borderTop: "1px solid var(--linha)", marginTop: 8 }}>
+                  <summary style={{ ...sumario, fontWeight: 400 }} className="suave">Sessões excluídas ({excluidas.length})</summary>
+                  {excluidas.map((e) => (
+                    <div key={e.id} className="suave" style={{ fontSize: 14, padding: "4px 0" }}>
+                      <s>{dataBR(e.data)}{e.notas ? ` · ${e.notas.slice(0, 60)}` : ""}</s> — excluída em {dataBR(e.excluido_em)}. Motivo: {e.excluido_motivo}
+                    </div>
+                  ))}
+                </details>
+              )}
             </div>
 
             <details className="cartao nao-imprimir">
